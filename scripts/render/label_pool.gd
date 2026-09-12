@@ -1,10 +1,11 @@
 class_name LabelPool
 extends Node2D
-## Pooled world-space Labels: 0..15 captains, 16..49 popups.
-## Source: .warboss-horde/slices/m2-renderer.md §4.
+## Pooled world-space Labels: 0..63 captains, 64..99 popups.
+## Source: .warboss-horde/slices/m2-renderer.md §4,
+## .warboss-horde/slices/m3-world-scene.md (captain slots raised to 64).
 
-const POOL_SIZE := 50
-const CAPTAIN_SLOTS := 16
+const POOL_SIZE := 100
+const CAPTAIN_SLOTS := 64
 const POPUP_LIFETIME := 1.0
 const POPUP_RISE := 30.0
 

@@ -278,8 +278,7 @@ func step(s: BattleState, dt: float) -> void:
 				s.morale[i] = minf(1.0, s.morale[i] + Tuning.CAPTAIN_MORALE_REGEN * dt)
 
 		if s.state[i] == BattleState.State.ENGAGE:
-			var routed: bool = captain_seen[f2] == 1 and s.faction_captain[f2] == -1
-			if s.morale[i] < Tuning.RETREAT_THRESHOLD or s.hp[i] < Tuning.RETREAT_HP_FRAC * s.hp_max[i] or routed:
+			if s.morale[i] < Tuning.RETREAT_THRESHOLD or s.hp[i] < Tuning.RETREAT_HP_FRAC * s.hp_max[i]:
 				s.state[i] = BattleState.State.RETREAT
 
 		if s.state[i] == BattleState.State.RETREAT:

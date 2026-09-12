@@ -272,7 +272,7 @@ func _init() -> void:
 	sim18.step(s18, dt)
 	t.check(s18.state[m18] == BattleState.State.RETREAT, "case18 state[0] == RETREAT (low morale)")
 
-	# 19. Captain death routs.
+	# 19. Captain death does not rout.
 	var s19 := BattleState.new(8, 3)
 	var c19 := s19.spawn(300.0, 300.0, 0, 0, 1, true)
 	var sol19 := s19.spawn(100.0, 100.0, 0, 0, 1, false)
@@ -281,7 +281,7 @@ func _init() -> void:
 	s19.state[c19] = BattleState.State.DEAD
 	s19.faction_captain[0] = -1
 	sim19.step(s19, dt)
-	t.check(s19.state[sol19] == BattleState.State.RETREAT, "case19 soldier routs on captain death")
+	t.check(s19.state[sol19] == BattleState.State.ENGAGE, "case19 soldier does not rout on captain death")
 
 	# Control: faction that never had a captain, full hp/morale -> stays ENGAGE.
 	var s19b := BattleState.new(8, 3)

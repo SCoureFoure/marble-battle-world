@@ -12,7 +12,7 @@ config_version=5
 
 config/name="Marble Battle World"
 config/features=PackedStringArray("4.7", "GL Compatibility")
-run/main_scene="res://scenes/battle.tscn"
+run/main_scene="res://scenes/world.tscn"
 
 [display]
 

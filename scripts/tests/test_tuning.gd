@@ -35,6 +35,18 @@ func _init() -> void:
 	t.check(Tuning.OBSTACLE_RADIUS_FRAC == 0.4, "Tuning.OBSTACLE_RADIUS_FRAC == 0.4")
 	t.check(Tuning.CAPTAIN_AURA_MULT == 6.0, "Tuning.CAPTAIN_AURA_MULT == 6.0")
 	t.check(Tuning.KB_SPIN_RESIST_MIN == 0.5, "Tuning.KB_SPIN_RESIST_MIN == 0.5")
+	t.check(Tuning.WORLD_COLS == 96, "Tuning.WORLD_COLS == 96")
+	t.check(Tuning.TILE == 32.0, "Tuning.TILE == 32.0")
+	t.check(Tuning.TILE_COST.size() == 8, "Tuning.TILE_COST.size() == 8")
+	t.check(Tuning.TILE_COST[3] == 0.0, "Tuning.TILE_COST[3] == 0.0")
+	t.check(Tuning.TIER_NAMES.size() == 4, "Tuning.TIER_NAMES.size() == 4")
+	t.check(Tuning.GOAL_WEIGHTS.size() == 5, "Tuning.GOAL_WEIGHTS.size() == 5")
+	t.check(Tuning.STACK_CAP == 300, "Tuning.STACK_CAP == 300")
+	t.check(Tuning.MAX_BATTLE_MARBLES == 3000, "Tuning.MAX_BATTLE_MARBLES == 3000")
+
+	t.check(Tuning.PLINKO_SLOTS == 9, "Tuning.PLINKO_SLOTS == 9")
+	t.check(Tuning.RECRUIT_N.size() == 4, "Tuning.RECRUIT_N.size() == 4")
+	t.check(Tuning.BORDER_RANGE == 10, "Tuning.BORDER_RANGE == 10")
 
 	t.finish()
 	quit()

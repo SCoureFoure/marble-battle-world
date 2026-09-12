@@ -70,7 +70,7 @@ func pos(i: int) -> Vector2:
 	return Vector2(state.px[i], state.py[i])
 
 
-func _physics_process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	var t0 := Time.get_ticks_usec()
 	sim.step(state, Tuning.DT)
 	sim_ms = (Time.get_ticks_usec() - t0) / 1000.0
@@ -97,7 +97,6 @@ func _physics_process(delta: float) -> void:
 		_capture()
 
 
-func _process(_delta: float) -> void:
 	hud.text = "fps %d  sim %.2f ms  alive %d  tick %d  f0 %d  f1 %d  winner %d" % [Engine.get_frames_per_second(), sim_ms, state.alive_count(), state.tick, state.faction_alive[0], state.faction_alive[1], sim.winner(state)]
 
 	for f in range(state.faction_count):

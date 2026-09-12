@@ -1,0 +1,122 @@
+class_name Stacks extends RefCounted
+## Marching unit stacks on the overworld. SoA per docs/ARCHITECTURE.md §11.3.
+
+enum State { IDLE = 0, MOVING = 1, BATTLE = 2, RETREATING = 3 }
+enum Goal { HUNT_WEAK = 0, EXPAND = 1, RAID = 2, DEFEND = 3, IDLE_HEAL = 4 }
+
+var n: int = 0
+var cap: int
+var x: PackedFloat32Array
+var y: PackedFloat32Array
+var prev_x: PackedFloat32Array
+var prev_y: PackedFloat32Array
+var faction: PackedInt32Array
+var count: PackedInt32Array
+var state: PackedInt32Array
+var goal: PackedInt32Array
+var battle_id: PackedInt32Array
+var captain_unit: PackedInt32Array
+var goal_tx: PackedInt32Array
+var goal_ty: PackedInt32Array
+var ai_timer: PackedFloat32Array
+var immunity: PackedFloat32Array
+var idle_timer: PackedFloat32Array
+var path: Array = []                # per stack: PackedVector2Array
+var path_i: PackedInt32Array
+var names: Array = []               # per stack: String
+var alive: PackedByteArray
+
+
+func _init(capacity: int) -> void:
+	cap = capacity
+	n = 0
+
+	x.resize(capacity)
+	y.resize(capacity)
+	prev_x.resize(capacity)
+	prev_y.resize(capacity)
+	faction.resize(capacity)
+	count.resize(capacity)
+	state.resize(capacity)
+	goal.resize(capacity)
+	battle_id.resize(capacity)
+	captain_unit.resize(capacity)
+	goal_tx.resize(capacity)
+	goal_ty.resize(capacity)
+	ai_timer.resize(capacity)
+	immunity.resize(capacity)
+	idle_timer.resize(capacity)
+	path_i.resize(capacity)
+	alive.resize(capacity)
+
+	x.fill(0.0)
+	y.fill(0.0)
+	prev_x.fill(0.0)
+	prev_y.fill(0.0)
+	faction.fill(0)
+	count.fill(0)
+	state.fill(State.IDLE)
+	goal.fill(Goal.IDLE_HEAL)
+	battle_id.fill(-1)
+	captain_unit.fill(-1)
+	goal_tx.fill(0)
+	goal_ty.fill(0)
+	ai_timer.fill(0.0)
+	immunity.fill(0.0)
+	idle_timer.fill(0.0)
+	path_i.fill(0)
+	alive.fill(0)
+
+	path = []
+	names = []
+
+
+func add(faction_: int, x_: float, y_: float, name_: String) -> int:
+	if n >= cap:
+		push_error("Stacks.add: capacity exceeded")
+		return -1
+
+	var idx := n
+	faction[idx] = faction_
+	x[idx] = x_
+	y[idx] = y_
+	prev_x[idx] = x_
+	prev_y[idx] = y_
+	state[idx] = State.IDLE
+	goal[idx] = Goal.IDLE_HEAL
+	battle_id[idx] = -1
+	captain_unit[idx] = -1
+	count[idx] = 0
+	ai_timer[idx] = 0.0
+	immunity[idx] = 0.0
+	idle_timer[idx] = 0.0
+	path.append(PackedVector2Array())
+	path_i[idx] = 0
+	names.append(name_)
+	alive[idx] = 1
+
+	n += 1
+	return idx
+
+
+func tier(i: int) -> int:
+	var c := count[i]
+	var t := 0
+	for threshold in Tuning.TIER_COUNTS:
+		if c >= threshold:
+			t += 1
+		else:
+			break
+	return t
+
+
+func label(i: int) -> String:
+	return "(%s)%s %d/%d" % [Tuning.TIER_NAMES[tier(i)], names[i], count[i], Tuning.STACK_CAP]
+
+
+func recount(units: Units) -> void:
+	for i in range(n):
+		count[i] = 0
+	for u in range(units.n):
+		if units.alive[u] == 1 and units.stack[u] >= 0:
+			count[units.stack[u]] += 1

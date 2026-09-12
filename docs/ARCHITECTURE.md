@@ -449,7 +449,8 @@ Step 10 transitions, per live marble `i` of faction `f`:
 - captain aura: if `faction_captain[f] >= 0` and `dist(i, captain) <= CAPTAIN_AURA_MULT * radius[captain]`:
   `morale[i] = min(1.0, morale[i] + CAPTAIN_MORALE_REGEN * dt)`.
 - ENGAGE → RETREAT when any of: `morale < RETREAT_THRESHOLD`,
-  `hp < RETREAT_HP_FRAC * hp_max`, or (`captain_seen[f] == 1` and `faction_captain[f] == -1`).
+  `hp < RETREAT_HP_FRAC * hp_max`.
+  Captain death only applies its morale hit (Leader decision 2026-09-12).
   RETREAT is terminal for the battle (no rally).
 - RETREAT marble at its home edge (`HOME_DIR[f % 4]`: left → `px <= arena.position.x + r`,
   right → `px >= arena.end.x - r`, top/bottom likewise on y) → `fled[i] = 1`,
@@ -495,3 +496,373 @@ Labels: pooled `Label`s (max 50) for captain names (`"Captain %d" % faction`)
 following their marble, and popups from `s.events`: KILL → `"+1 kill"` at
 the actor, LEVEL → `"LVL %d" % rank` at the actor, CAPTAIN_DEAD →
 `"CAPTAIN DOWN"` at the target. Popups rise 30 px over 1.0 s and fade.
+
+## 11. M3 — overworld, units, stacks, battle bridge
+
+Files live in `scripts/world/`. Same rules as §0: SoA packed arrays,
+`class_name` modules, `rng` on the owning object, headless tests.
+
+### 11.1 Tuning additions (fiat)
+
+```
+WORLD_COLS = 96
+WORLD_ROWS = 54
+TILE = 32.0                       # world units per tile; map = 3072 x 1728
+TILE_COST = [1.0, 1.6, 2.0, 0.0, 3.0, 1.0, 1.2, 0.8]   # by WorldMap.Kind; 0.0 = impassable
+N_FACTIONS = 6
+TOWNS_PER_FACTION = 1             # capitals; plus NEUTRAL_TOWNS
+NEUTRAL_TOWNS = 18
+TOWN_MIN_SPACING = 6              # tiles
+STACKS_PER_FACTION = 3
+STACK_UNITS_MIN = 60
+STACK_UNITS_MAX = 120
+STACK_CAP = 300
+STACK_SPEED = 48.0                # world units/s on cost-1.0 tiles
+STACK_RADIUS = 12.0               # collision circle, world units
+TIER_COUNTS = [30, 100, 250]      # count < 30 → tier 0 ... >= 250 → tier 3
+TIER_NAMES = ["Band", "Company", "Host", "Horde"]
+AI_TICK = 2.0                     # seconds between goal picks for an IDLE stack
+GOAL_WEIGHTS = [3.0, 3.0, 2.0, 1.0, 1.0]   # hunt_weak, expand, raid, defend, idle
+IDLE_AFTER_BATTLE = 3.0           # winner stays put this long
+RETREAT_TILES = 6                 # loser falls back this far along its home direction when no own town exists
+RETREAT_SPEED_MULT = 1.3
+RETREAT_IMMUNITY = 10.0           # seconds a RETREATING stack cannot start a battle
+REINFORCE_TILES = 6
+MAX_BATTLE_MARBLES = 3000
+BATTLE_EXTRA_CAP = 600            # capacity headroom for reinforcements
+```
+
+### 11.2 WorldMap (`world_map.gd`)
+
+```gdscript
+class_name WorldMap extends RefCounted
+enum Kind { PLAINS = 0, FOREST = 1, HILLS = 2, MOUNTAIN = 3, RIVER = 4, RUIN = 5, GRAVEYARD = 6, TOWN = 7 }
+var cols: int; var rows: int
+var kind: PackedByteArray           # cols*rows
+var owner: PackedInt32Array         # faction id, -1 neutral; set from town ownership (M4 borders)
+var rng: RandomNumberGenerator
+func _init(cols_: int, rows_: int, seed: int) -> void
+func idx(tx: int, ty: int) -> int                  # ty*cols + tx; -1 if out of range
+func in_bounds(tx: int, ty: int) -> bool
+func cost_at(tx: int, ty: int) -> float           # Tuning.TILE_COST[kind]; 0.0 out of range
+func passable(tx: int, ty: int) -> bool           # cost > 0
+func tile_of(x: float, y: float) -> Vector2i      # floor(x / TILE), clamped
+func center_of(tx: int, ty: int) -> Vector2       # (tx + 0.5, ty + 0.5) * TILE
+func reachable_count(tx: int, ty: int) -> int     # BFS over passable 4-neighbours (test helper)
+```
+
+`WorldGen` (`world_gen.gd`, `class_name WorldGen`):
+`static func generate(m: WorldMap) -> Array` returns the town tile list
+(`Array[Vector2i]`) and fills `m.kind`. Uses `FastNoiseLite` seeded from
+`m.rng.randi()` (noise type SIMPLEX_SMOOTH, frequency 0.05): elevation
+`e` in [-1,1]: `e > 0.45` MOUNTAIN, `e > 0.2` HILLS, else PLAINS. A second
+noise (seed +1, frequency 0.08) `f > 0.25` → FOREST on PLAINS only. Rivers:
+`max(2, cols/32)` rivers, each starting at a random HILLS tile and walking
+to the lowest-elevation 4-neighbour until it reaches the map edge or 200
+steps, marking RIVER (never over MOUNTAIN; stops instead). RUIN ×6,
+GRAVEYARD ×6 on random PLAINS tiles. Towns: `N_FACTIONS * TOWNS_PER_FACTION + NEUTRAL_TOWNS`
+tiles chosen from PLAINS with Chebyshev spacing ≥ `TOWN_MIN_SPACING`
+(rejection sampling, up to 5000 attempts), set to TOWN, returned in order
+(first `N_FACTIONS` are capitals for factions 0..N-1). After placement,
+every town must be in the largest passable component: towns outside it are
+re-rolled (up to 20 rounds). Determinism: same seed → same map.
+
+### 11.3 Units and Stacks (`units.gd`, `stacks.gd`)
+
+```gdscript
+class_name Units extends RefCounted        # every soldier in the world, persistent
+var n: int; var cap: int
+var faction, rank, xp, kills, weapon, stack: PackedInt32Array   # stack = stack id or -1 (dead/unassigned)
+var hp_frac: PackedFloat32Array                                  # 1.0 healthy; wounds persist until Settle (M4)
+var alive, is_captain: PackedByteArray
+var names: Dictionary                                            # unit id -> String, only captains/legends
+func _init(capacity: int) -> void
+func add(faction_: int, rank_: int, weapon_: int, captain: bool, stack_: int) -> int   # -1 when full
+func kill(id: int) -> void                                       # alive = 0, stack = -1
+```
+
+```gdscript
+class_name Stacks extends RefCounted
+enum State { IDLE = 0, MOVING = 1, BATTLE = 2, RETREATING = 3 }
+enum Goal { HUNT_WEAK = 0, EXPAND = 1, RAID = 2, DEFEND = 3, IDLE_HEAL = 4 }
+var n: int; var cap: int
+var x, y, prev_x, prev_y: PackedFloat32Array
+var faction, count, state, goal, battle_id, captain_unit: PackedInt32Array   # battle_id -1; captain_unit -1
+var goal_tx, goal_ty: PackedInt32Array
+var ai_timer, immunity, idle_timer: PackedFloat32Array
+var path: Array                      # per stack: PackedVector2Array of tile centres (world units), empty when none
+var path_i: PackedInt32Array         # next waypoint index
+var names: Array                     # String per stack
+var alive: PackedByteArray           # 0 once count reaches 0 (slot retired)
+func _init(capacity: int) -> void
+func add(faction_: int, x_: float, y_: float, name_: String) -> int
+func tier(i: int) -> int             # from count and Tuning.TIER_COUNTS
+func label(i: int) -> String         # "(%s)%s %d/%d" % [TIER_NAMES[tier], name, count, STACK_CAP]
+```
+
+`NameGen` (`namegen.gd`, `class_name NameGen`):
+`static func stack_name(rng) -> String` and `static func captain_name(rng) -> String`
+from syllable tables; captain names carry a dynasty numeral suffix
+`" I"` initially (M5 increments).
+
+### 11.4 Pathing (`pathing.gd`)
+
+```gdscript
+class_name Pathing extends RefCounted
+var grid: AStarGrid2D
+func _init(m: WorldMap) -> void      # region = Rect2i(0,0,cols,rows); cell_size = Vector2(TILE,TILE);
+                                     # diagonal_mode = ONLY_IF_NO_OBSTACLES; default_compute_heuristic = OCTILE;
+                                     # solid where !passable; weight_scale = cost elsewhere; update()
+func find(from: Vector2i, to: Vector2i) -> PackedVector2Array   # tile centres in world units, excluding `from`; empty if unreachable
+```
+
+### 11.5 BattleBridge (`battle_bridge.gd`)
+
+```gdscript
+class_name BattleInstance extends RefCounted   # (in battle_instance.gd)
+var id: int
+var tile: Vector2i
+var state: BattleState
+var sim: BattleSim
+var terrain: TerrainGrid
+var faction_map: PackedInt32Array   # local faction index -> world faction id
+var unit_of: PackedInt32Array       # marble index -> unit id
+var stack_ids: PackedInt32Array     # every stack that joined
+var edge_of_faction: PackedInt32Array   # local faction -> home edge 0..3 (matches Tuning.HOME_DIR order)
+var started: float                  # world time
+```
+
+Local faction index **equals** the home edge index (0 left, 1 right, 2 top,
+3 bottom), so `Tuning.HOME_DIR[f % 4]` is already right. At most 4 world
+factions per battle; a fifth collides later and waits.
+
+```gdscript
+class_name BattleBridge extends RefCounted
+static func edge_for(tile_center: Vector2, from: Vector2, taken: PackedInt32Array) -> int
+    # d = from - tile_center; dominant axis picks 0/1 (x) or 2/3 (y); if taken, the opposite edge; if both taken, the first free of the other axis
+static func spawn_rect(edge: int) -> Rect2
+    # 0: Rect2(40,100,360,700)  1: Rect2(1200,100,360,700)  2: Rect2(300,40,1000,240)  3: Rect2(300,620,1000,240)
+static func start(world: World, stack_a: int, stack_b: int) -> BattleInstance
+    # capacity = min(MAX_BATTLE_MARBLES, count_a + count_b + BATTLE_EXTRA_CAP); seed = world.rng.randi()
+    # terrain = TerrainGen.from_tile(kind of tile, edges used, s.rng); join(inst, stack_a); join(inst, stack_b)
+static func join(inst: BattleInstance, world: World, stack: int) -> bool
+    # assigns/looks up the local faction for the stack's world faction (edge_for with the stack's prev position)
+    # spawns every live unit of the stack: spawn(x,y in spawn_rect(edge), local_f, rank, weapon, is_captain); hp = hp_max * hp_frac
+    # records unit_of; stack state = BATTLE, battle_id = inst.id; returns false (no spawn) when capacity would be exceeded
+static func finish(inst: BattleInstance, world: World) -> Dictionary
+    # for each marble i: u = unit_of[i]; xp/kills/rank copied back; hp_frac = hp/hp_max (fled marbles: their last hp);
+    # DEAD and not fled -> Units.kill(u); count of each stack recomputed from units
+    # winner_world = faction_map[sim.winner] or -1 for -2
+    # loser stacks: state RETREATING, immunity = RETREAT_IMMUNITY, goal = nearest own TOWN tile else RETREAT_TILES back along -HOME_DIR[edge]
+    # winner stacks: state IDLE, idle_timer = IDLE_AFTER_BATTLE, stay on tile
+    # stacks with count 0 -> alive = 0
+    # appends [tile.x, tile.y, dead_count, world.time] to world.scars
+    # returns {"winner": winner_world, "tile": tile, "dead": dead_count, "duration": world.time - started}
+```
+
+`TerrainGen.from_tile(g, kind, edges: PackedInt32Array, rng)` (fiat table;
+obstacles/hazards never inside the spawn rects of the edges given):
+PLAINS: 1 mud 5x5, 3 rocks. FOREST: 20 trees, 1 mud. HILLS: rows 0..7 slope
+(0,+40), rows 15..22 slope (0,-40), 6 rocks. RIVER: WATER cols 19..20 all
+rows except a COBBLE ford rows 10..12, 4 rocks. RUIN: 3 FIRE 2x2, 6 rocks,
+cobble rows 11..12. GRAVEYARD: 4 SPIKE cells, 2 mud 5x5. TOWN: TOWER at
+(20,11), COBBLE rows 11..12 and cols 19..20, 4 trees. MOUNTAIN: never.
+
+### 11.6 World + WorldSim (`world.gd`, `world_sim.gd`)
+
+```gdscript
+class_name World extends RefCounted
+var rng: RandomNumberGenerator
+var map: WorldMap
+var towns: PackedVector2Array       # tile coords as Vector2 (x, y); index = town id
+var town_owner: PackedInt32Array    # faction or -1
+var units: Units
+var stacks: Stacks
+var pathing: Pathing
+var battles: Array                  # live BattleInstance
+var next_battle_id: int
+var scars: Array
+var time: float
+var faction_count: int
+static func create(seed: int) -> World
+    # map + WorldGen; towns; capitals owned by faction i; STACKS_PER_FACTION stacks per faction placed on
+    # the capital tile and its passable neighbours; each stack gets rng.randi_range(STACK_UNITS_MIN, STACK_UNITS_MAX)
+    # units rank 0, weapon rng 0..4, plus one captain (rank 1, sword) named by NameGen
+```
+
+`WorldSim.step(w: World, dt: float)`:
+1. `w.time += dt`; timers (`ai_timer`, `immunity`, `idle_timer`) decrease.
+2. AI: every alive stack with state IDLE and `idle_timer <= 0` and
+   `ai_timer <= 0`: pick a goal by `GOAL_WEIGHTS` via `w.rng`:
+   HUNT_WEAK → nearest enemy stack with `count <= own count` (else any
+   enemy stack); EXPAND → nearest neutral town; RAID → nearest enemy town;
+   DEFEND → nearest own town; IDLE_HEAL → stay. If a target exists:
+   `path = pathing.find(...)`, `path_i = 0`, state MOVING. `ai_timer = AI_TICK`.
+   RETREATING stacks that reach their goal become IDLE.
+3. Movement: MOVING/RETREATING stacks advance toward `path[path_i]` at
+   `STACK_SPEED / cost_at(current tile)` (× `RETREAT_SPEED_MULT` when
+   retreating); on reaching a waypoint (distance < 2) advance `path_i`;
+   at the end → IDLE (`prev_x/y` are updated **before** the move each tick).
+4. Collisions: `SpatialHash` over alive stacks (cell 64, bounds = map);
+   pairs with distance < `2 * STACK_RADIUS`, different factions, neither
+   in BATTLE, neither with `immunity > 0`: if one of them is on a tile that
+   already has a live battle → `BattleBridge.join`; else
+   `BattleBridge.start`. At most one new battle per tile per tick.
+5. Reinforcements: for each live battle, every stack of an involved world
+   faction that is IDLE/MOVING (not RETREATING, not BATTLE) within
+   `REINFORCE_TILES` (Chebyshev, tile coords) gets goal = battle tile,
+   state MOVING (path recomputed once); when a MOVING stack's tile equals a
+   live battle tile of its faction's battle → `join`.
+6. Battles: `inst.sim.step(inst.state, Tuning.DT)` for every live battle
+   (one sim tick per world tick); when `winner != -1` → `finish`, remove.
+7. Retire stacks with `count == 0`.
+
+Tests build a tiny world by hand (`World.new()` with a 12x8 map filled
+PLAINS, two stacks placed by the test) rather than through `create` where
+possible; `create(seed)` is tested for determinism and counts only.
+
+## 12. M4 — plinko, towns, borders, ledger
+
+### 12.1 Tuning additions (fiat)
+
+```
+PLINKO_W = 360.0
+PLINKO_H = 480.0
+PLINKO_SLOTS = 9
+PLINKO_ROWS_MIN = 6
+PLINKO_ROWS_MAX = 10
+PLINKO_PEG_R = 6.0
+PLINKO_BALL_R = 8.0
+PLINKO_GRAVITY = 600.0
+PLINKO_RESTITUTION = 0.6
+PLINKO_DT = 1.0 / 120.0
+PLINKO_MAX_STEPS = 2400          # 20 s cap
+PLINKO_SLOT_BAND = 40.0          # bottom band height where slot crossings count
+PLINKO_MAX_OUTCOMES = 3
+RECRUIT_N = [10, 20, 30, 40]     # by stack tier
+FORGE_N = 10
+DRILL_SPIN_BONUS = 20.0          # spin_cap per drill level, max level 3
+HERO_XP = 50
+CURSE_FRAC = 0.10
+TOWN_POP_START = 50.0
+TOWN_POP_MAX = 200.0
+TOWN_POP_GROWTH = 0.05           # per second
+TOWN_RECRUIT_RATE = 0.10         # units per second while INTACT and owned
+TOWN_RECRUIT_RANGE = 8           # tiles: nearest own stack to receive recruits
+RAID_RECOVER = 300.0             # s until RAIDED -> INTACT (neutral)
+RAZE_RECOVER = 900.0             # s until RAZED -> INTACT (neutral), tile RUIN -> TOWN
+RAID_RANGE = 10                  # tiles for RAID/RAZE target search
+BORDER_RANGE = 10                # tiles: a tile belongs to the nearest owned town within this
+LEDGER_REFRESH = 0.5
+```
+
+### 12.2 Plinko (`scripts/world/plinko.gd`)
+
+```gdscript
+class_name Plinko extends RefCounted
+enum Slot { SETTLE = 0, RECRUIT = 1, RAID = 2, RAZE = 3, FORGE = 4, DRILL = 5, HERO_TRIAL = 6, HEIR = 7, CURSE = 8 }
+var rows: int
+var pegs: PackedVector2Array          # board space, (0,0) top-left, width PLINKO_W, height PLINKO_H
+var slot_order: PackedInt32Array      # length PLINKO_SLOTS, a permutation of Slot values; slot k at x in [k*sw, (k+1)*sw)
+var bias: float                       # constant horizontal acceleration, world units/s^2
+static func build(rows_: int, bias_: float, rng: RandomNumberGenerator) -> Plinko
+    # pegs: row r (0..rows-1) at y = 60 + r * ((PLINKO_H - 120) / rows); columns spaced sw = PLINKO_W / PLINKO_SLOTS,
+    # staggered by sw/2 on odd rows; x from sw/2 (even) or sw (odd) up to PLINKO_W - sw/2; slot_order = identity then
+    # Fisher-Yates shuffled with rng.
+func drop(x0: float, rng: RandomNumberGenerator) -> Dictionary
+    # {"path": PackedVector2Array, "slots": PackedInt32Array (distinct Slot values in crossing order, max PLINKO_MAX_OUTCOMES)}
+    # ball starts at (x0 + rng.randf_range(-2, 2), PLINKO_BALL_R), v = 0; each PLINKO_DT: v.y += GRAVITY*dt, v.x += bias*dt,
+    # p += v*dt; walls x in [R, W-R] reflect with RESTITUTION; peg collision: circle-circle with radius PEG_R + BALL_R,
+    # push out along normal, reflect normal velocity with RESTITUTION, and add rng.randf_range(-15, 15) to v.x;
+    # once p.y >= PLINKO_H - PLINKO_SLOT_BAND, every slot column k the ball is in is appended (if not already) to slots;
+    # ends when p.y >= PLINKO_H - BALL_R or steps == PLINKO_MAX_STEPS (then the slot under the ball is appended if none).
+    # path records p every 4 steps (for rendering).
+```
+
+`PlinkoProfile` per faction on `World`: `plinko_rows: PackedInt32Array`
+(init 7), `plinko_bias: PackedFloat32Array` (init 0), `plinko_order: Array`
+of PackedInt32Array (init from `build` with the world rng). Boards are
+rebuilt from the profile when a drop happens (`Plinko.build` then
+`slot_order = profile order`).
+
+### 12.3 Outcomes (`scripts/world/plinko_outcomes.gd`)
+
+`class_name PlinkoOutcomes`, `static func apply(w: World, stack: int, slot: int) -> String`
+returns a one-line log text. Rules (fiat):
+
+- SETTLE: nearest town (any state) whose owner is not `f`, preferring
+  neutral, within RAID_RANGE → `owner = f`, state INTACT; all units of the
+  stack `hp_frac = 1.0`; `w.recompute_borders()`. No town → heal only.
+- RECRUIT: `n = RECRUIT_N[tier]`; nearest own INTACT town within
+  TOWN_RECRUIT_RANGE: `n = min(n, floor(pop))`, `pop -= n`; else (wilds)
+  `n = n / 2`. Adds `n` units (rank 0, weapon rng, stack = this) up to STACK_CAP.
+- RAID: nearest enemy town within RAID_RANGE → state RAIDED, `owner = -1`,
+  `pop *= 0.5`; every unit of the stack `xp += 5`; recompute borders.
+- RAZE: nearest enemy town within RAID_RANGE → state RAZED, `owner = -1`,
+  `pop = 0`, `raze_timer = RAZE_RECOVER`, map tile kind → RUIN; recompute borders.
+- FORGE: the FORGE_N lowest-rank alive units of the stack get `rank += 1` (cap 3).
+- DRILL: `Units.drill[u] = min(3, drill + 1)` for every unit of the stack.
+- HERO_TRIAL: captain unit `xp += HERO_XP`, `rank = min(3, rank + 1)`.
+- HEIR: if `captain_unit == -1` or the captain is dead: the alive unit with
+  most kills becomes captain (`is_captain = 1`, `names[u] = NameGen.captain_name(w.rng)`,
+  `captain_unit = u`); else no effect.
+- CURSE: kill `ceil(CURSE_FRAC * count)` non-captain units (desertion, lowest xp first).
+
+`BattleBridge.join` applies `state.spin_cap[i] += DRILL_SPIN_BONUS * drill[u]`.
+
+After `BattleBridge.finish` with a winner: for each winner stack, one drop
+per alive captain in it (`drops = 1 if captain alive else 0`); `World`
+records `[stack, slots_array, log_lines]` into `w.plinko_log` (Array, last
+50 kept) and applies every slot in order. Drops are simulated headlessly
+inside `WorldSim` (no rendering dependency); the scene animates the last
+entry of `plinko_log` when it changes.
+
+### 12.4 Towns (`scripts/world/town_sim.gd`)
+
+`World` gains parallel town arrays: `town_state: PackedInt32Array`
+(0 INTACT, 1 RAIDED, 2 RAZED), `town_pop: PackedFloat32Array`,
+`town_recruit: PackedFloat32Array`, `town_timer: PackedFloat32Array`,
+plus `plinko_rows/bias/order` and `plinko_log`. `create` and
+`setup_blank` initialise them; `add_town(tile, owner)` helper appends to
+every array and sets the map tile kind TOWN.
+
+`TownSim.step(w, dt)` (static):
+- `pop = min(POP_MAX, pop + POP_GROWTH*dt)` for INTACT towns.
+- Owned INTACT towns: `recruit += RECRUIT_RATE*dt`; while `recruit >= 1`
+  and `pop >= 1`: `recruit -= 1`, `pop -= 1`, add one unit (rank 0,
+  weapon rng) to the nearest own stack within TOWN_RECRUIT_RANGE that is
+  not in BATTLE and has `count < STACK_CAP`; if none, create a garrison
+  stack on the town tile (`Stacks.add(f, cx, cy, NameGen.stack_name)`,
+  goal DEFEND) and add the unit there.
+- RAIDED: `timer -= dt`; at 0 → INTACT. RAZED: `timer -= dt`; at 0 →
+  INTACT, `pop = TOWN_POP_START/2`, map tile kind → TOWN.
+- Ownership by occupation: an alive stack IDLE on a neutral INTACT town
+  tile for ≥ 3 s (`idle_timer` finished and state IDLE) captures it
+  (`owner = f`, recompute borders).
+
+### 12.5 Borders
+
+`World.recompute_borders()`: for every passable tile, `map.owner` = owner of
+the nearest owned town (Chebyshev distance ≤ BORDER_RANGE, ties → lowest
+town id), else -1. MOUNTAIN tiles stay -1. Called on every ownership change
+(SETTLE/RAID/RAZE/capture/finish) and once in `create`.
+
+### 12.6 Rendering
+
+- `MapLayer`: after the base texture, an ownership overlay texture
+  (per-tile owner colour at alpha 0.28, transparent for -1) rebuilt only
+  when `w.borders_version` (int, incremented by `recompute_borders`)
+  changes; plus border lines: for each tile whose east or south neighbour
+  has a different owner, a 2 px line in the darker owner colour (drawn in
+  `_draw`, redrawn on version change only). Town markers: a house glyph
+  (square + triangle) in owner colour; RAIDED → grey; RAZED → black with a
+  small orange flame triangle.
+- `LedgerPanel` (`scripts/render/ledger_panel.gd`, `CanvasLayer` child
+  `PanelContainer` at top-right, width 260): one row per faction sorted by
+  power = units alive + 50 × towns: colour swatch, `♛` for the current
+  leader, `units`, `towns`, `stacks`. Refresh every LEDGER_REFRESH s.
+- `PlinkoView` (`scripts/render/plinko_view.gd`, `CanvasLayer` child at
+  bottom-left, 360×480 scaled 0.5): draws the last board (pegs, slot labels
+  from `Plinko.Slot` names, slot_order) and animates the recorded path
+  over 2 s, then shows the outcome text for 3 s. Only the newest
+  `plinko_log` entry is shown; older ones are skipped.
