@@ -1,0 +1,28 @@
+# Godot 4+
+.godot/
+/android/
+*.import.tmp
+
+# Mono/C# (unused)
+.mono/
+data_*/
+mono_crash.*.json
+
+# OS / editor cruft
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+
+# Builds
+/build/
+/exports/
+*.exe
+*.zip
+*.pck
+
+# warboss-horde metering, contracts, captured output
+.warboss-horde/
+
+# Dev screenshots
+/screenshots/

@@ -1,0 +1,57 @@
+class_name Tuning
+extends RefCounted
+## Every tuning constant. Source: docs/ARCHITECTURE.md §2 (GDD §7 + fiat values).
+
+const DT := 1.0 / 60.0
+const ENGAGE_RADIUS_MULT := 12.0
+const K_ATTR := 40.0
+const K_COHESION := 15.0
+const K_SEPARATION := 120.0
+const SEPARATION_RANGE_MULT := 1.2
+const SPIN_START := 100.0
+const SPIN_CAP := [120.0, 150.0, 190.0, 250.0]
+const SPIN_DECAY := 4.0
+const SPIN_HIT_COST := 6.0
+const SPIN_TRANSFER := 0.15
+const FRICTION := 0.92
+const FRICTION_MUD := 0.80
+const FRICTION_COBBLE := 0.98
+const MORALE_START := 0.8
+const MORALE_HIT_ALLY_DEATH := -0.02
+const MORALE_HIT_CAPTAIN_DEAD := -0.4
+const RETREAT_THRESHOLD := 0.25
+const RANK_MULT := [1.0, 1.25, 1.6, 2.2]
+const XP_PER_HIT := 1
+const XP_PER_KILL := 10
+const RANK_XP := [0, 30, 120, 500]
+const T_MAX_BATTLE := 120.0
+const BASE_RADIUS := 8.0
+const RADIUS_RANK_MULT := [1.0, 1.1, 1.2, 1.3]
+const CAPTAIN_RADIUS_MULT := 1.6
+const HP_BASE := 100.0
+const SPIN_REF := 100.0
+const SPIN_TO_RAD := TAU / 60.0
+const RPM_MIN := 5.0
+const MAX_SPEED := 400.0
+const CRIT_CHANCE := 0.05
+const CRIT_MULT := 2.0
+const FUMBLE_CHANCE := 0.03
+const FUMBLE_SPIN_LOSS := 20.0
+const RESTITUTION := 0.9
+const ARENA_W := 1600.0
+const ARENA_H := 900.0
+const ENGAGE_RETARGET_TICKS := 15
+const MAX_NEIGHBORS := 64
+const RETREAT_HP_FRAC := 0.20
+const FACTION_COLORS := [Color(0.85,0.2,0.2), Color(0.2,0.4,0.9), Color(0.2,0.7,0.3), Color(0.9,0.7,0.1), Color(0.6,0.3,0.8), Color(0.9,0.5,0.2), Color(0.2,0.8,0.8), Color(0.5,0.5,0.5)]
+const HOME_DIR := [Vector2(-1,0), Vector2(1,0), Vector2(0,-1), Vector2(0,1)]
+const WEAPON_NAMES := ["dagger", "sword", "spear", "axe", "shield"]
+const WEAPON_REACH := [0.8, 1.2, 2.0, 1.3, 0.9]
+const WEAPON_DMG := [4.0, 8.0, 8.0, 14.0, 2.0]
+const WEAPON_COOLDOWN := [0.15, 0.30, 0.45, 0.50, 0.30]
+const WEAPON_KB := [60.0, 120.0, 60.0, 220.0, 120.0]
+const WEAPON_HIT_R := [0.45, 0.5, 0.4, 0.55, 0.5]
+const SHIELD_DMG_MULT := 0.5
+const SHIELD_FACING_DOT := 0.7071
+const WEAPON_COUNT := 5
+const MAX_FACTIONS := 16

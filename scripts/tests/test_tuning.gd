@@ -1,0 +1,29 @@
+extends SceneTree
+const TestKit = preload("res://scripts/tests/test_kit.gd")
+
+func _init() -> void:
+	var t := TestKit.new()
+
+	t.check(t.approx(Tuning.DT, 1.0 / 60.0), "Tuning.DT approx 1.0 / 60.0")
+	t.check(Tuning.SPIN_CAP.size() == 4, "Tuning.SPIN_CAP.size() == 4")
+	t.check(Tuning.SPIN_CAP[3] == 250.0, "Tuning.SPIN_CAP[3] == 250.0")
+	t.check(Tuning.RANK_MULT == [1.0, 1.25, 1.6, 2.2], "Tuning.RANK_MULT == [1.0, 1.25, 1.6, 2.2]")
+	t.check(Tuning.RANK_XP[2] == 120, "Tuning.RANK_XP[2] == 120")
+	t.check(Tuning.WEAPON_NAMES.size() == Tuning.WEAPON_COUNT, "Tuning.WEAPON_NAMES.size() == Tuning.WEAPON_COUNT")
+	t.check(Tuning.WEAPON_REACH.size() == Tuning.WEAPON_COUNT, "Tuning.WEAPON_REACH.size() == Tuning.WEAPON_COUNT")
+	t.check(Tuning.WEAPON_DMG.size() == Tuning.WEAPON_COUNT, "Tuning.WEAPON_DMG.size() == Tuning.WEAPON_COUNT")
+	t.check(Tuning.WEAPON_COOLDOWN.size() == Tuning.WEAPON_COUNT, "Tuning.WEAPON_COOLDOWN.size() == Tuning.WEAPON_COUNT")
+	t.check(Tuning.WEAPON_KB.size() == Tuning.WEAPON_COUNT, "Tuning.WEAPON_KB.size() == Tuning.WEAPON_COUNT")
+	t.check(Tuning.WEAPON_HIT_R.size() == Tuning.WEAPON_COUNT, "Tuning.WEAPON_HIT_R.size() == Tuning.WEAPON_COUNT")
+	t.check(Tuning.WEAPON_REACH[2] == 2.0, "Tuning.WEAPON_REACH[2] == 2.0 (spear outranges)")
+	t.check(Tuning.WEAPON_DMG[3] > Tuning.WEAPON_DMG[1], "Tuning.WEAPON_DMG[3] > Tuning.WEAPON_DMG[1] (axe > sword)")
+	t.check(Tuning.FACTION_COLORS.size() == 8, "Tuning.FACTION_COLORS.size() == 8")
+	t.check(Tuning.HOME_DIR.size() == 4, "Tuning.HOME_DIR.size() == 4")
+	t.check(Tuning.HOME_DIR[1] == Vector2(1, 0), "Tuning.HOME_DIR[1] == Vector2(1, 0)")
+	t.check(t.approx(Tuning.SPIN_TO_RAD, 0.10471976), "Tuning.SPIN_TO_RAD approx 0.10471976")
+	t.check(Tuning.ARENA_W == 1600.0, "Tuning.ARENA_W == 1600.0")
+	t.check(Tuning.ARENA_H == 900.0, "Tuning.ARENA_H == 900.0")
+	t.check(Tuning.T_MAX_BATTLE == 120.0, "Tuning.T_MAX_BATTLE == 120.0")
+
+	t.finish()
+	quit()
