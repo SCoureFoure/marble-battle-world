@@ -94,5 +94,54 @@ func _init() -> void:
 	b.state[0] = BattleState.State.DEAD
 	t.check(b.alive_count() == 4, "alive_count == 4 after setting one to DEAD")
 
+	# Case 9: fled and events fields
+	var s9 := BattleState.new(8, 1)
+	t.check(s9.fled.size() == 8, "fled.size() == 8")
+	t.check(s9.fled[3] == 0, "fled[3] == 0")
+	t.check(s9.events.size() == 0, "events.size() == 0")
+	t.check(s9.events is Array, "events is Array")
+
+	# Case 10: survivors_count with fled marbles
+	var s10 := BattleState.new(8, 1)
+	s10.spawn(10.0, 10.0, 0, 0, 1, false)
+	s10.spawn(20.0, 20.0, 0, 0, 1, false)
+	s10.spawn(30.0, 30.0, 0, 0, 1, false)
+	s10.state[0] = BattleState.State.DEAD
+	s10.fled[0] = 1
+	s10.state[1] = BattleState.State.DEAD
+	t.check(s10.survivors_count(0) == 2, "survivors_count(0) == 2")
+	t.check(s10.survivors_count(1) == 0, "survivors_count(1) == 0")
+	t.check(s10.alive_count() == 1, "alive_count() == 1")
+
+	# Case 11: spawn_block with random weapons
+	var s11a := BattleState.new(300, 11)
+	s11a.spawn_block(0, 200, Rect2(0, 0, 100, 100), -1)
+	t.check(s11a.n == 200, "n == 200 after spawn_block")
+	var all_weapons_valid := true
+	var weapon_set := {}
+	for idx in range(200):
+		if s11a.weapon_id[idx] < 0 or s11a.weapon_id[idx] > 4:
+			all_weapons_valid = false
+		weapon_set[s11a.weapon_id[idx]] = true
+	t.check(all_weapons_valid, "all weapons in [0, 4]")
+	t.check(weapon_set.size() >= 3, "at least 3 distinct weapon ids")
+
+	var s11b := BattleState.new(300, 11)
+	s11b.spawn_block(0, 200, Rect2(0, 0, 100, 100), -1)
+	t.check(s11a.weapon_id == s11b.weapon_id, "weapon_id arrays equal with same seed")
+
+	# Case 12: spawn_block with explicit weapon
+	var s12 := BattleState.new(10, 2)
+	s12.spawn_block(1, 5, Rect2(0, 0, 10, 10), 2)
+	var all_weapon_2 := true
+	for idx in range(5):
+		if s12.weapon_id[idx] != 2:
+			all_weapon_2 = false
+	t.check(all_weapon_2, "all five marbles have weapon_id == 2")
+
+	# Case 13: Event enum values
+	t.check(BattleState.Event.CAPTAIN_DEAD == 3, "BattleState.Event.CAPTAIN_DEAD == 3")
+	t.check(BattleState.Event.FLED == 4, "BattleState.Event.FLED == 4")
+
 	t.finish()
 	quit()

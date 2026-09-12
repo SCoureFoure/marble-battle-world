@@ -53,5 +53,60 @@ func _init() -> void:
 	var buf5 := BattleRenderer.build_buffer(s5)
 	t.check(t.approx(buf5[8], 0.2), "faction 9 wraps to color index 1, buf[8] approx 0.2")
 
+	# Case 6: captain rank 1 -> ca approx 1/3 + 2 = 2.3333
+	var s6 := BattleState.new(4, 1)
+	s6.spawn(0.0, 0.0, 0, 1, 0, true)
+	var buf6 := BattleRenderer.build_buffer(s6)
+	t.check(t.approx(buf6[11], 2.3333, 1e-3), "captain rank 1 ca approx 2.3333")
+
+	# Case 7: build_weapon_buffer - one sword marble at (100,200) r 8, weapon_angle = 0
+	var s7 := BattleState.new(4, 1)
+	var i7 := s7.spawn(100.0, 200.0, 0, 0, 1, false)
+	s7.weapon_angle[i7] = 0.0
+	var wbuf7 := BattleRenderer.build_weapon_buffer(s7)
+	t.check(wbuf7.size() == 12, "weapon buffer size 12")
+	t.check(t.approx(wbuf7[0], 4.8), "wbuf[0] approx 4.8")
+	t.check(t.approx(wbuf7[1], 0.0), "wbuf[1] approx 0")
+	t.check(t.approx(wbuf7[3], 104.8), "wbuf[3] approx 104.8")
+	t.check(t.approx(wbuf7[4], 0.0), "wbuf[4] approx 0")
+	t.check(t.approx(wbuf7[5], 1.0), "wbuf[5] approx 1.0")
+	t.check(t.approx(wbuf7[7], 200.0), "wbuf[7] approx 200.0")
+	t.check(t.approx(wbuf7[8], 0.25), "wbuf[8] approx 0.25")
+
+	s7.weapon_angle[i7] = PI / 2.0
+	var wbuf7b := BattleRenderer.build_weapon_buffer(s7)
+	t.check(t.approx(wbuf7b[0], 0.0), "wbuf2[0] approx 0")
+	t.check(t.approx(wbuf7b[1], -1.0), "wbuf2[1] approx -1.0")
+	t.check(t.approx(wbuf7b[4], 4.8), "wbuf2[4] approx 4.8")
+	t.check(t.approx(wbuf7b[5], 0.0), "wbuf2[5] approx 0")
+	t.check(t.approx(wbuf7b[3], 100.0), "wbuf2[3] approx 100.0")
+	t.check(t.approx(wbuf7b[7], 204.8), "wbuf2[7] approx 204.8")
+
+	# Case 8: build_hp_buffer - marble at (100,200) r 8, hp=50 hp_max=100
+	var s8 := BattleState.new(4, 1)
+	var i8 := s8.spawn(100.0, 200.0, 0, 0, 0, false)
+	s8.hp[i8] = 50.0
+	var hbuf8 := BattleRenderer.build_hp_buffer(s8)
+	t.check(t.approx(hbuf8[0], 8.0), "hbuf[0] approx 8.0")
+	t.check(t.approx(hbuf8[5], 1.5), "hbuf[5] approx 1.5")
+	t.check(t.approx(hbuf8[3], 100.0), "hbuf[3] approx 100.0")
+	t.check(t.approx(hbuf8[7], 188.0), "hbuf[7] approx 188.0")
+	t.check(t.approx(hbuf8[8], 0.5), "hbuf[8] approx 0.5")
+
+	s8.hp[i8] = s8.hp_max[i8]
+	var hbuf8b := BattleRenderer.build_hp_buffer(s8)
+	t.check(hbuf8b[0] == 0.0, "hbuf full hp -> buf[0] == 0.0")
+	t.check(hbuf8b[5] == 0.0, "hbuf full hp -> buf[5] == 0.0")
+
+	# Case 9: DEAD marble -> weapon buffer basis entries all 0
+	var s9 := BattleState.new(4, 1)
+	var i9 := s9.spawn(100.0, 200.0, 0, 0, 1, false)
+	s9.state[i9] = BattleState.State.DEAD
+	var wbuf9 := BattleRenderer.build_weapon_buffer(s9)
+	t.check(wbuf9[0] == 0.0, "dead wbuf[0] == 0")
+	t.check(wbuf9[1] == 0.0, "dead wbuf[1] == 0")
+	t.check(wbuf9[4] == 0.0, "dead wbuf[4] == 0")
+	t.check(wbuf9[5] == 0.0, "dead wbuf[5] == 0")
+
 	t.finish()
 	quit()

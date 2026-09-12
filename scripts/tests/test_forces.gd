@@ -56,7 +56,8 @@ func _init() -> void:
 	s3.ax.fill(0.0)
 	s3.ay.fill(0.0)
 	Forces.accumulate(s3, hs3[0])
-	t.check(t.approx(s3.ax[a3], 0.0, 1e-3), "case3 ax[0] approx 0")
+	t.check(t.approx(s3.ax[a3], 20.0, 1e-3), "case3 ax[0] approx 20.0")
+	t.check(t.approx(s3.ay[a3], 0.0, 1e-3), "case3 ay[0] approx 0")
 
 	# 4. Retreat flips attraction and adds the home-edge pull.
 	var s4 := make(4)
@@ -102,7 +103,7 @@ func _init() -> void:
 	s6.ax.fill(0.0)
 	s6.ay.fill(0.0)
 	Forces.accumulate(s6, hs6[0])
-	t.check(t.approx(s6.ax[a6], 0.0, 1e-3), "case6 ax[0] approx 0")
+	t.check(t.approx(s6.ax[a6], 20.0, 1e-3), "case6 ax[0] approx 20.0")
 
 	# 7. Cohesion toward centroid.
 	var s7 := make(7)
@@ -157,6 +158,99 @@ func _init() -> void:
 	t.check(t.approx(v10.length(), 120.0, 0.01), "case10 length approx 120.0")
 	t.check(is_finite(s10.ax[a10]) and is_finite(s10.ay[a10]), "case10 finite")
 	t.check(not (v10.x == 0.0 and v10.y == 0.0), "case10 nonzero")
+
+	# 11. Advance magnitude and direction.
+	var s11 := make(11)
+	var a11 := s11.spawn(100, 100, 0, 0, 0, false)
+	var b11 := s11.spawn(400, 300, 1, 0, 0, false)
+	var hs11 := hashes(s11)
+	s11.faction_cx[0] = 100.0
+	s11.faction_cy[0] = 100.0
+	s11.faction_cx[1] = 400.0
+	s11.faction_cy[1] = 300.0
+	s11.ax.fill(0.0)
+	s11.ay.fill(0.0)
+	Forces.accumulate(s11, hs11[0])
+	var dir_11 := Vector2(300.0, 200.0).normalized()
+	t.check(t.approx(s11.ax[a11], 20.0 * dir_11.x, 1e-3), "case11 ax[0] approx 16.641")
+	t.check(t.approx(s11.ay[a11], 20.0 * dir_11.y, 1e-3), "case11 ay[0] approx 11.094")
+	var dir_11_neg := Vector2(-300.0, -200.0).normalized()
+	t.check(t.approx(s11.ax[b11], 20.0 * dir_11_neg.x, 1e-3), "case11 ax[1] approx -16.641")
+	t.check(t.approx(s11.ay[b11], 20.0 * dir_11_neg.y, 1e-3), "case11 ay[1] approx -11.094")
+
+	# 12. Target suppresses advance.
+	var s12 := make(12)
+	var a12 := s12.spawn(100, 100, 0, 0, 1, false)
+	var b12 := s12.spawn(180.0, 100.0, 1, 0, 1, false)
+	var hs12 := hashes(s12)
+	Forces.retarget(s12, hs12[1], 0)
+	s12.faction_cx[0] = 100.0
+	s12.faction_cy[0] = 100.0
+	s12.faction_cx[1] = 180.0
+	s12.faction_cy[1] = 100.0
+	s12.ax.fill(0.0)
+	s12.ay.fill(0.0)
+	Forces.accumulate(s12, hs12[0])
+	t.check(t.approx(s12.ax[a12], 32.0, 1e-3), "case12 ax[0] approx 32.0")
+
+	# 13. Retreat suppresses advance.
+	var s13 := make(13)
+	var a13 := s13.spawn(100, 100, 0, 0, 1, false)
+	var b13 := s13.spawn(400, 100, 1, 0, 1, false)
+	var hs13 := hashes(s13)
+	s13.state[a13] = BattleState.State.RETREAT
+	s13.target_id[a13] = -1
+	s13.faction_cx[0] = 100.0
+	s13.faction_cy[0] = 100.0
+	s13.faction_cx[1] = 400.0
+	s13.faction_cy[1] = 100.0
+	s13.ax.fill(0.0)
+	s13.ay.fill(0.0)
+	Forces.accumulate(s13, hs13[0])
+	t.check(t.approx(s13.ax[a13], -40.0, 1e-3), "case13 ax[0] approx -40.0")
+
+	# 14. No live enemy → no advance.
+	var s14 := make(14)
+	var a14 := s14.spawn(100, 100, 0, 0, 1, false)
+	var b14 := s14.spawn(400, 100, 1, 0, 1, false)
+	var hs14 := hashes(s14)
+	s14.faction_cx[0] = 100.0
+	s14.faction_cy[0] = 100.0
+	s14.faction_cx[1] = 400.0
+	s14.faction_cy[1] = 100.0
+	s14.faction_alive[1] = 0
+	s14.ax.fill(0.0)
+	s14.ay.fill(0.0)
+	Forces.accumulate(s14, hs14[0])
+	t.check(t.approx(s14.ax[a14], 0.0, 1e-3), "case14 ax[0] approx 0.0")
+
+	# 15. Nearest enemy faction wins, then update.
+	var s15 := make(15)
+	var a15 := s15.spawn(100, 100, 0, 0, 1, false)
+	var b15 := s15.spawn(400, 100, 1, 0, 1, false)
+	var c15 := s15.spawn(100, 400, 2, 0, 1, false)
+	var hs15 := hashes(s15)
+	s15.faction_cx[0] = 100.0
+	s15.faction_cy[0] = 100.0
+	s15.faction_cx[1] = 400.0
+	s15.faction_cy[1] = 100.0
+	s15.faction_cx[2] = 100.0
+	s15.faction_cy[2] = 400.0
+	s15.ax.fill(0.0)
+	s15.ay.fill(0.0)
+	Forces.accumulate(s15, hs15[0])
+	t.check(t.approx(s15.ax[a15], 20.0, 1e-3), "case15a ax[0] approx 20.0")
+	t.check(t.approx(s15.ay[a15], 0.0, 1e-3), "case15a ay[0] approx 0")
+	# Move C nearer
+	s15.px[c15] = 100.0
+	s15.py[c15] = 350.0
+	s15.faction_cx[2] = 100.0
+	s15.faction_cy[2] = 350.0
+	s15.ax.fill(0.0)
+	s15.ay.fill(0.0)
+	Forces.accumulate(s15, hs15[0])
+	t.check(t.approx(s15.ax[a15], 0.0, 1e-3), "case15b ax[0] approx 0")
+	t.check(t.approx(s15.ay[a15], 20.0, 1e-3), "case15b ay[0] approx 20.0")
 
 	t.finish()
 	quit()

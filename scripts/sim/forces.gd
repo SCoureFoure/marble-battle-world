@@ -59,7 +59,7 @@ static func accumulate(s: BattleState, fine: SpatialHash) -> void:
 	var faction_captain := s.faction_captain
 	var faction_cx := s.faction_cx
 	var faction_cy := s.faction_cy
-	var rng := s.rng
+	var faction_alive := s.faction_alive
 
 	for i in range(s.n):
 		if state[i] == BattleState.State.DEAD:
@@ -82,6 +82,27 @@ static func accumulate(s: BattleState, fine: SpatialHash) -> void:
 				s.ax[i] += mag * dx / dist
 				s.ay[i] += mag * dy / dist
 
+		# advance: pull toward nearest enemy faction centroid when no target
+		if state[i] == BattleState.State.ENGAGE and target_id[i] == -1:
+			var best_g := -1
+			var best_dist := 0.0
+			for g in range(s.faction_count):
+				if g == f:
+					continue
+				if faction_alive[g] <= 0:
+					continue
+				var cdx := faction_cx[g] - px[i]
+				var cdy := faction_cy[g] - py[i]
+				var cdist := sqrt(cdx * cdx + cdy * cdy)
+				if best_g == -1 or cdist < best_dist or (cdist == best_dist and g < best_g):
+					best_g = g
+					best_dist = cdist
+			if best_g >= 0 and best_dist > 0.0:
+				var cdx := faction_cx[best_g] - px[i]
+				var cdy := faction_cy[best_g] - py[i]
+				s.ax[i] += Tuning.K_ADVANCE * cdx / best_dist
+				s.ay[i] += Tuning.K_ADVANCE * cdy / best_dist
+
 		# cohesion (the captain is its own anchor: no term at all)
 		if faction_captain[f] != i:
 			var cap := faction_captain[f]
@@ -100,33 +121,76 @@ static func accumulate(s: BattleState, fine: SpatialHash) -> void:
 				s.ax[i] += Tuning.K_COHESION * adx / adist
 				s.ay[i] += Tuning.K_COHESION * ady / adist
 
-		# separation (same faction, live, within range)
-		var k := fine.gather(px[i], py[i])
-		var scratch := fine.scratch
-		for idx in range(k):
-			var j := scratch[idx]
-			if j == i:
-				continue
-			if state[j] == BattleState.State.DEAD:
-				continue
-			if faction_id[j] != f:
-				continue
-			var sdx := px[j] - px[i]
-			var sdy := py[j] - py[i]
-			var sdist := sqrt(sdx * sdx + sdy * sdy)
-			var sep_range := Tuning.SEPARATION_RANGE_MULT * (r + radius[j])
-			if sdist < sep_range:
-				var smag := Tuning.K_SEPARATION * (1.0 - sdist / sep_range)
-				if sdist > 0.0:
-					s.ax[i] -= smag * sdx / sdist
-					s.ay[i] -= smag * sdy / sdist
-				else:
-					var ang := rng.randf() * TAU
-					s.ax[i] += smag * cos(ang)
-					s.ay[i] += smag * sin(ang)
-
 		# retreat: pull toward the faction's home edge
 		if retreating:
 			var home: Vector2 = Tuning.HOME_DIR[f % 4]
 			s.ax[i] += Tuning.K_ATTR * home.x
 			s.ay[i] += Tuning.K_ATTR * home.y
+
+	# separation (same faction, live, within range): second pass over the
+	# grid's cells, visiting each unordered pair once.
+	_accumulate_separation(s, fine)
+
+
+# Separation: for every unordered near pair sharing a faction, apply the
+# same-magnitude push to both sides at once (equal and opposite).
+static func _accumulate_separation(s: BattleState, fine: SpatialHash) -> void:
+	var cols: int = fine.cols
+	var rows: int = fine.rows
+	var cs: PackedInt32Array = fine.cell_start
+	var en: PackedInt32Array = fine.entries
+	var radius: PackedFloat32Array = s.radius
+	var faction_id: PackedInt32Array = s.faction_id
+	var sep_range_mult: float = Tuning.SEPARATION_RANGE_MULT
+	var k_sep: float = Tuning.K_SEPARATION
+	for cy in rows:
+		for cx in cols:
+			var c: int = cy * cols + cx
+			var a0: int = cs[c]
+			var a1: int = cs[c + 1]
+			if a0 == a1:
+				continue
+			for k in 5:
+				var d: int
+				match k:
+					0: d = c
+					1: d = c + 1 if cx + 1 < cols else -1
+					2: d = c + cols - 1 if (cx > 0 and cy + 1 < rows) else -1
+					3: d = c + cols if cy + 1 < rows else -1
+					_: d = c + cols + 1 if (cx + 1 < cols and cy + 1 < rows) else -1
+				if d < 0:
+					continue
+				var b0: int = cs[d]
+				var b1: int = cs[d + 1]
+				if b0 == b1:
+					continue
+				for p in range(a0, a1):
+					var i: int = en[p]
+					var q0: int = p + 1 if k == 0 else b0
+					for q in range(q0, b1):
+						var j: int = en[q]
+						# PAIR: same-faction only; magnitude formula matches §6, applied
+						# from both sides at once. Coincident marbles draw one random
+						# direction per pair and push apart with opposite signs.
+						if faction_id[i] != faction_id[j]:
+							continue
+						var dx := s.px[j] - s.px[i]
+						var dy := s.py[j] - s.py[i]
+						var dist := sqrt(dx * dx + dy * dy)
+						var sep_range := sep_range_mult * (radius[i] + radius[j])
+						if dist >= sep_range:
+							continue
+						var smag := k_sep * (1.0 - dist / sep_range)
+						if dist > 0.0:
+							s.ax[i] -= smag * dx / dist
+							s.ay[i] -= smag * dy / dist
+							s.ax[j] += smag * dx / dist
+							s.ay[j] += smag * dy / dist
+						else:
+							var ang := s.rng.randf() * TAU
+							var ux := cos(ang)
+							var uy := sin(ang)
+							s.ax[i] += smag * ux
+							s.ay[i] += smag * uy
+							s.ax[j] -= smag * ux
+							s.ay[j] -= smag * uy

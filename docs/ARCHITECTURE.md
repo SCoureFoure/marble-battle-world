@@ -319,3 +319,179 @@ bash tools/verify.sh test_spatial_hash 1
 
 Green requires: exit 0, no `Parse Error` / `SCRIPT ERROR` / `Compile Error`
 / `Failed to load script` in output, no `FAILURES=`, and `ALL_PASS` present.
+
+## 10. M2 additions — weapons, terrain, transitions, captains, events
+
+### 10.1 New tuning (fiat, appended to `Tuning`)
+
+```
+K_ADVANCE = 20.0                 # pull toward nearest enemy faction centroid when no target
+FRICTION_ICE = 0.99
+FRICTION_WATER = 0.70
+TERRAIN_CELL = 40.0              # arena grid cell, world units
+OBSTACLE_RADIUS_FRAC = 0.4       # rock/tree circle radius = TERRAIN_CELL * this
+HAZARD_DPS = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 8.0, 15.0]   # by TerrainGrid.Kind; FIRE 8, SPIKE 15
+TOWER_SPIN_REGEN = 10.0          # RPM/s to owner faction inside a tower cell
+TOWER_HEAL = 5.0                 # hp/s to owner faction inside a tower cell
+CAPTAIN_AURA_MULT = 6.0          # aura radius = 6 * captain radius
+CAPTAIN_MORALE_REGEN = 0.05      # morale/s inside aura, capped at 1.0
+KB_SPIN_RESIST_MIN = 0.5         # spin_resist = max(this, spin / SPIN_REF)
+```
+
+### 10.2 BattleState additions
+
+```gdscript
+var fled: PackedByteArray        # 1 when a RETREAT marble reached its home edge; state is then DEAD (out of the arena) but it survives the battle
+var events: Array                # per-tick event list, each `[type: int, actor: int, target: int]`; BattleSim clears it at step 1; the scene reads it after step
+enum Event { HIT = 0, KILL = 1, LEVEL = 2, CAPTAIN_DEAD = 3, FLED = 4 }
+func survivors_count(faction: int) -> int   # marbles of faction with state != DEAD or fled == 1
+```
+
+`spawn_block(faction, count, rect, weapon)`: `weapon == -1` draws each
+marble's weapon as `rng.randi_range(0, Tuning.WEAPON_COUNT - 1)`.
+
+### 10.3 TerrainGrid (`scripts/sim/terrain_grid.gd`)
+
+```gdscript
+class_name TerrainGrid extends RefCounted
+enum Kind { PLAIN = 0, MUD = 1, COBBLE = 2, ICE = 3, WATER = 4, ROCK = 5, TREE = 6, TOWER = 7, FIRE = 8, SPIKE = 9 }
+var cols: int; var rows: int; var cell: float; var origin: Vector2
+var kind: PackedByteArray          # cols*rows, Kind
+var slope_x, slope_y: PackedFloat32Array   # per-cell constant acceleration
+var owner: PackedInt32Array        # tower owner faction, -1 none (only meaningful for TOWER cells)
+func setup(bounds: Rect2, cell_size: float) -> void   # cols = ceili(w/cell), rows = ceili(h/cell); all PLAIN, slopes 0, owner -1
+func cell_at(x: float, y: float) -> int                # clamped
+func kind_at(x: float, y: float) -> int
+func friction_of(k: int) -> float      # PLAIN/ROCK/TREE/TOWER/FIRE/SPIKE 0.92, MUD 0.80, COBBLE 0.98, ICE 0.99, WATER 0.70
+static func is_solid(k: int) -> bool   # ROCK, TREE
+func cell_center(c: int) -> Vector2
+func set_cell(cx: int, cy: int, k: int) -> void
+func fill_rect(cx0: int, cy0: int, cx1: int, cy1: int, k: int) -> void   # inclusive, clamped
+func set_slope(cx: int, cy: int, v: Vector2) -> void
+```
+
+`TerrainGen` (`scripts/sim/terrain_gen.gd`, `class_name TerrainGen`):
+`static func demo(g: TerrainGrid, rng: RandomNumberGenerator) -> void` —
+two mud blobs, one cobble road strip across the middle, ~12 rock/tree
+cells (never inside the spawn rects `Rect2(100,100,500,700)` /
+`Rect2(1000,100,500,700)`), one TOWER at the arena centre cell, one FIRE
+patch of 2x2 cells, one ICE patch 3x3, a slope band pushing +y on the top
+two rows. All draws from `rng`.
+
+### 10.4 Weapons (`scripts/sim/weapons.gd`)
+
+```gdscript
+class_name Weapons extends RefCounted
+static func tick(s: BattleState, fine: SpatialHash, dt: float) -> void
+```
+
+For every marble `i` with `state != DEAD`:
+1. `weapon_angle[i] = fposmod(weapon_angle[i] + spin[i] * SPIN_TO_RAD * dt, TAU)`.
+2. `hit_cd[i] = max(0, hit_cd[i] - dt)`.
+3. Only if `state == ENGAGE`, `hit_cd == 0`, and `target_id[i] >= 0` (a
+   coarse-hash enemy exists within engage radius): hit point
+   `h = p_i + (cos a, sin a) * WEAPON_REACH[w] * r_i`, hit radius
+   `hr = WEAPON_HIT_R[w] * r_i`. Among `fine.gather(h.x, h.y)` pick the
+   live enemy `j` (`faction != faction_i`, `state != DEAD`) minimising
+   `|p_j - h|` subject to `|p_j - h| < hr + r_j`. None → `hit_cd[i] = WEAPON_RECHECK`
+   so the gather is skipped next tick.
+4. On a candidate: `roll = s.rng.randf()`.
+   - `roll < CRIT_CHANCE` → `mult = CRIT_MULT`
+   - else `roll < CRIT_CHANCE + FUMBLE_CHANCE` → fumble: `spin[i] = max(RPM_MIN, spin[i] - FUMBLE_SPIN_LOSS)`, `hit_cd[i] = WEAPON_COOLDOWN[w]`, no damage, no event. Stop.
+   - else `mult = 1.0`.
+5. `dmg = WEAPON_DMG[w] * (spin[i] / SPIN_REF) * RANK_MULT[rank[i]] * mult`.
+   Shield: if `weapon_id[j] == 4` and `dot(normalize(p_i - p_j), (cos a_j, sin a_j)) > SHIELD_FACING_DOT` → `dmg *= SHIELD_DMG_MULT`.
+6. `resist = max(KB_SPIN_RESIST_MIN, spin[j] / SPIN_REF)`;
+   `kb = WEAPON_KB[w] * (spin[i] / SPIN_REF) / resist`;
+   `v_j += normalize(p_j - p_i) * kb` (velocity impulse, mass-independent).
+7. `hp[j] -= dmg`; `xp[i] += XP_PER_HIT`; `hit_cd[i] = WEAPON_COOLDOWN[w]`;
+   push `[Event.HIT, i, j]`.
+8. If `hp[j] <= 0`: `state[j] = DEAD`; `hp[j] = 0`; `kills[i] += 1`;
+   `xp[i] += XP_PER_KILL`; `faction_alive[f_j] -= 1`; push `[Event.KILL, i, j]`;
+   every live marble `m` of faction `f_j`: `morale[m] = max(0, morale[m] + MORALE_HIT_ALLY_DEATH)`.
+   If `is_captain[j]`: additionally `morale[m] = max(0, morale[m] + MORALE_HIT_CAPTAIN_DEAD)`
+   for those `m`, `faction_captain[f_j] = -1`, push `[Event.CAPTAIN_DEAD, i, j]`.
+9. Rank-up check for `i` (after xp changes): while `rank[i] < 3 and xp[i] >= RANK_XP[rank[i] + 1]`:
+   `rank[i] += 1`; `spin_cap[i] = SPIN_CAP[rank]`; `old = hp_max[i]`;
+   `hp_max[i] = HP_BASE * RANK_MULT[rank]`; `hp[i] += hp_max[i] - old`;
+   `mass[i] = radius[i]^2 * RANK_MULT[rank]` (radius unchanged mid-battle);
+   push `[Event.LEVEL, i, rank[i]]`.
+
+One hit per attacker per tick at most. Weapon hits do not cost spin
+(contact cost lives in `Collision`).
+
+### 10.5 BattleSim M2 changes
+
+`BattleSim` gains `var terrain: TerrainGrid` (may be null → plain
+everywhere) and `var captain_seen: PackedByteArray` sized MAX_FACTIONS,
+set to 1 for any faction that had `faction_captain >= 0` at `_init`.
+
+Step 1 also `s.events.clear()`.
+
+Step 6 integrate, per live marble, after `vx += ax*dt`:
+- friction = `terrain.friction_of(terrain.kind_at(px, py))` if terrain else `FRICTION`.
+- slope: `vx += slope_x[c] * dt; vy += slope_y[c] * dt` (before friction).
+- After the wall clamp, obstacles: for the 3x3 terrain cells around the
+  marble, each `is_solid` cell is a circle at `cell_center(c)` with radius
+  `TERRAIN_CELL * OBSTACLE_RADIUS_FRAC`; if `dist < R + r_i`: push the
+  marble out along the normal to `R + r_i` and reflect the normal velocity
+  component with `RESTITUTION` if it points into the obstacle.
+- hazard: `hp[i] -= HAZARD_DPS[k] * dt`; if `hp <= 0` → `state = DEAD`,
+  `faction_alive[f] -= 1`, push `[Event.KILL, -1, i]` (actor -1 = terrain).
+- tower: if `k == TOWER`: `owner[c]` = the faction if exactly one faction
+  has live marbles in that cell this tick (evaluate once per tick per tower
+  cell, before applying auras); if `owner[c] == faction_id[i]`:
+  `spin[i] = min(spin_cap, spin + TOWER_SPIN_REGEN*dt)`, `hp[i] = min(hp_max, hp + TOWER_HEAL*dt)`.
+
+Step 8: `Weapons.tick(s, fine, dt)`.
+
+Step 10 transitions, per live marble `i` of faction `f`:
+- captain aura: if `faction_captain[f] >= 0` and `dist(i, captain) <= CAPTAIN_AURA_MULT * radius[captain]`:
+  `morale[i] = min(1.0, morale[i] + CAPTAIN_MORALE_REGEN * dt)`.
+- ENGAGE → RETREAT when any of: `morale < RETREAT_THRESHOLD`,
+  `hp < RETREAT_HP_FRAC * hp_max`, or (`captain_seen[f] == 1` and `faction_captain[f] == -1`).
+  RETREAT is terminal for the battle (no rally).
+- RETREAT marble at its home edge (`HOME_DIR[f % 4]`: left → `px <= arena.position.x + r`,
+  right → `px >= arena.end.x - r`, top/bottom likewise on y) → `fled[i] = 1`,
+  `state[i] = DEAD`, `faction_alive[f] -= 1`, push `[Event.FLED, i, -1]`.
+
+### 10.6 Forces M2 change — advance
+
+In `accumulate`, when `state[i] == ENGAGE` and `target_id[i] == -1`: pull
+`K_ADVANCE * normalize(c - p_i)` toward the nearest enemy faction centroid
+`c` over factions `g != f` with `faction_alive[g] > 0`. No enemy faction
+alive → no term.
+
+### 10.7 Renderer M2
+
+Body custom data: `ca = rank / 3.0 + (2.0 if is_captain else 0.0)`; shader:
+`cap = custom.a >= 2.0`, `rank = cap ? custom.a - 2.0 : custom.a`; captains
+get a dark centre dot (`d < 0.25`).
+
+Second `MultiMeshInstance2D` `Weapons`: quad 2x2, `use_custom_data`, per
+instance transform = rotation `weapon_angle` about the marble centre,
+scale `(WEAPON_REACH[w] * r, 0.25 * r)`, origin = marble pos + dir *
+`0.5 * WEAPON_REACH[w] * r` (a bar from rim to reach); custom =
+`(weapon_id / 4.0, 0, 0, 0)`; DEAD → scale 0. Shader draws a dark bar,
+shield (`id == 4`) as a short thick bar.
+
+Third `MultiMeshInstance2D` `HpBars`: quad 2x2, transform scale
+`(r, 1.5)`, origin `(px, py - r - 4)`, custom `(hp / hp_max, 0, 0, 0)`;
+shader fills left `custom.r` fraction green→red, rest dark; hidden (scale
+0) when `hp == hp_max` or DEAD.
+
+Static buffer builders, all pure and headless-tested:
+`build_buffer(s)` (bodies, unchanged layout), `build_weapon_buffer(s)`,
+`build_hp_buffer(s)`.
+
+Terrain: a `TerrainLayer extends Node2D` child drawing one rect per
+non-PLAIN cell in `_draw` (colours: MUD 0.55,0.42,0.28; COBBLE 0.75,0.72,0.66;
+ICE 0.80,0.90,0.95; WATER 0.45,0.60,0.80; ROCK 0.45,0.45,0.45 circle;
+TREE 0.30,0.50,0.30 circle; TOWER 0.35,0.30,0.40 square with owner colour
+inner square; FIRE 0.95,0.45,0.10; SPIKE 0.30,0.30,0.30 with X). Redrawn
+only when `queue_redraw()` is called (owner change).
+
+Labels: pooled `Label`s (max 50) for captain names (`"Captain %d" % faction`)
+following their marble, and popups from `s.events`: KILL → `"+1 kill"` at
+the actor, LEVEL → `"LVL %d" % rank` at the actor, CAPTAIN_DEAD →
+`"CAPTAIN DOWN"` at the target. Popups rise 30 px over 1.0 s and fade.

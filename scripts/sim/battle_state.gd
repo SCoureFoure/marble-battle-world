@@ -1,6 +1,7 @@
 class_name BattleState extends RefCounted
 
 enum State { ENGAGE = 0, RETREAT = 1, DEAD = 2 }
+enum Event { HIT = 0, KILL = 1, LEVEL = 2, CAPTAIN_DEAD = 3, FLED = 4 }
 
 var n: int = 0
 var cap: int
@@ -38,6 +39,9 @@ var kills: PackedInt32Array
 var xp: PackedInt32Array
 var target_id: PackedInt32Array
 var is_captain: PackedByteArray
+var fled: PackedByteArray
+
+var events: Array = []
 
 # per-faction
 var faction_alive: PackedInt32Array
@@ -84,6 +88,7 @@ func _init(capacity: int, seed: int) -> void:
 	xp.resize(capacity)
 	target_id.resize(capacity)
 	is_captain.resize(capacity)
+	fled.resize(capacity)
 
 	# Fill integer arrays with -1
 	captain_id.fill(-1)
@@ -113,6 +118,8 @@ func _init(capacity: int, seed: int) -> void:
 	kills.fill(0)
 	xp.fill(0)
 	is_captain.fill(0)
+	fled.fill(0)
+	events = []
 
 	# Resize faction arrays to MAX_FACTIONS
 	faction_alive.resize(Tuning.MAX_FACTIONS)
@@ -205,6 +212,9 @@ func spawn(x: float, y: float, faction: int, rank_: int, weapon: int, captain: b
 	else:
 		is_captain[idx] = 0
 
+	# Initialize fled
+	fled[idx] = 0
+
 	# Update faction tracking
 	faction_alive[faction] += 1
 	faction_count = max(faction_count, faction + 1)
@@ -222,10 +232,21 @@ func alive_count() -> int:
 	return count
 
 
+func survivors_count(faction: int) -> int:
+	var count := 0
+	for i in range(n):
+		if faction_id[i] == faction and (state[i] != State.DEAD or fled[i] == 1):
+			count += 1
+	return count
+
+
 func spawn_block(faction: int, count: int, rect: Rect2, weapon: int) -> void:
 	for _i in range(count):
 		var x := rect.position.x + rng.randf() * rect.size.x
 		var y := rect.position.y + rng.randf() * rect.size.y
-		var result := spawn(x, y, faction, 0, weapon, false)
+		var w := weapon
+		if weapon == -1:
+			w = rng.randi_range(0, Tuning.WEAPON_COUNT - 1)
+		var result := spawn(x, y, faction, 0, w, false)
 		if result == -1:
 			break
