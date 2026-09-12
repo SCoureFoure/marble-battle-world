@@ -48,5 +48,13 @@ func _init() -> void:
 	t.check(Tuning.RECRUIT_N.size() == 4, "Tuning.RECRUIT_N.size() == 4")
 	t.check(Tuning.BORDER_RANGE == 10, "Tuning.BORDER_RANGE == 10")
 
+	t.check(Tuning.TRAIT_THRESHOLD == 3, "Tuning.TRAIT_THRESHOLD == 3")
+	t.check(Tuning.LEGEND_RANK == 3, "Tuning.LEGEND_RANK == 3")
+	t.check(Tuning.KTRAIT_INIT == 0.5, "Tuning.KTRAIT_INIT == 0.5")
+	t.check(Tuning.REL_ALLY_THRESHOLD == 0.5, "Tuning.REL_ALLY_THRESHOLD == 0.5")
+	t.check(Tuning.MAX_FACTIONS_WORLD == 16, "Tuning.MAX_FACTIONS_WORLD == 16")
+	t.check(Tuning.SPLIT_UNITS == 600, "Tuning.SPLIT_UNITS == 600")
+	t.check(Tuning.PLINKO_BIAS_GREED == 200.0, "Tuning.PLINKO_BIAS_GREED == 200.0")
+
 	t.finish()
 	quit()

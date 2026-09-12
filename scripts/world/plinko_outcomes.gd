@@ -141,14 +141,11 @@ static func _raid(w: World, stack: int, f: int) -> String:
 		w.town_state[town] = 1
 		w.town_owner[town] = -1
 		w.town_pop[town] *= 0.5
+		w.town_timer[town] = Tuning.RAID_RECOVER
 		for u in range(w.units.n):
 			if w.units.stack[u] == stack and w.units.alive[u] == 1:
 				w.units.xp[u] += 5
 		w.recompute_borders()
-	# UNDECIDED: §12.3's RAID bullet does not mention a timer (unlike RAZE's
-	# explicit `raze_timer = RAZE_RECOVER`), so no town_timer is set here even
-	# though TownSim's RAIDED -> INTACT recovery (§12.4) needs one counting
-	# down. Implemented literally per the RAID bullet as written.
 	return "%s: RAID took %d" % [w.stacks.names[stack], town]
 
 

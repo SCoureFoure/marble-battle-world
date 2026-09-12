@@ -16,6 +16,8 @@ static func step_world(w: World, dt: float) -> void:
 		if st.idle_timer[i] > 0.0:
 			st.idle_timer[i] -= dt
 
+	TownSim.step(w, dt)
+
 	for i in range(st.n):
 		if st.alive[i] == 0:
 			continue
@@ -264,10 +266,39 @@ static func step_battles(w: World) -> void:
 		inst.sim.step(inst.state, Tuning.DT)
 		var win := inst.sim.winner(inst.state)
 		if win != -1:
-			BattleBridge.finish(inst, w)
+			var result := BattleBridge.finish(inst, w)
+			var winner: int = result["winner"]
+			if winner >= 0:
+				_run_plinko(w, inst, winner)
 		else:
 			remaining.append(inst)
 	w.battles = remaining
+
+
+## After a finish with a winner: one plinko drop per winner stack with a
+## living captain (docs/ARCHITECTURE.md §12.3/§12.4 fork tags).
+static func _run_plinko(w: World, inst: BattleInstance, winner: int) -> void:
+	var st := w.stacks
+	for stack in inst.stack_ids:
+		if st.faction[stack] != winner:
+			continue
+		if st.alive[stack] == 0 or st.count[stack] <= 0:
+			continue
+		var captain: int = st.captain_unit[stack]
+		if captain < 0 or w.units.alive[captain] != 1:
+			continue
+
+		var board := Plinko.build(w.plinko_rows[winner], w.plinko_bias[winner], w.rng)
+		board.slot_order = w.plinko_order[winner]
+		var d := board.drop(Tuning.PLINKO_W * 0.5, w.rng)
+
+		var lines: Array = []
+		for slot in d["slots"]:
+			lines.append(PlinkoOutcomes.apply(w, stack, slot))
+
+		w.plinko_log.append([stack, d["slots"], lines, d["path"], board.pegs, board.slot_order])
+		if w.plinko_log.size() > 50:
+			w.plinko_log.pop_front()
 
 
 static func _live_battle_at(w: World, tile: Vector2i) -> BattleInstance:

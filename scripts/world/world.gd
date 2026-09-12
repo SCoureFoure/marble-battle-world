@@ -23,7 +23,13 @@ var plinko_rows: PackedInt32Array   # per faction, init 7
 var plinko_bias: PackedFloat32Array # per faction, init 0.0
 var plinko_order: Array             # per faction PackedInt32Array
 var plinko_log: Array               # [stack, PackedInt32Array slots, Array[String] lines]
+var events_log: Array = []          # String, one line per finished battle (M4)
 var borders_version: int = 0
+var ktraits: PackedFloat32Array     # size MAX_FACTIONS_WORLD*5; index f*5+k (M5)
+var relations: PackedFloat32Array   # size MAX_FACTIONS_WORLD^2; index a*MAX_FACTIONS_WORLD+b (M5)
+var faction_alive: PackedByteArray  # 1 while the faction has towns or stacks (M5)
+var faction_color: PackedInt32Array # index into Tuning.FACTION_COLORS, f % 8 at creation (M5)
+var faction_names: Array            # String per faction, NameGen.kingdom_name (M5)
 
 # Clockwise from north: N, NE, E, SE, S, SW, W, NW.
 const NEIGHBOR_DIRS := [
@@ -55,6 +61,11 @@ func _init() -> void:
 	plinko_order = []
 	plinko_log = []
 	borders_version = 0
+	ktraits = PackedFloat32Array()
+	relations = PackedFloat32Array()
+	faction_alive = PackedByteArray()
+	faction_color = PackedInt32Array()
+	faction_names = []
 
 
 func setup_blank(cols: int, rows: int, seed: int) -> void:
@@ -92,6 +103,21 @@ func setup_blank(cols: int, rows: int, seed: int) -> void:
 		plinko_order.append(order)
 	plinko_log = []
 	borders_version = 0
+
+	ktraits = PackedFloat32Array()
+	ktraits.resize(Tuning.MAX_FACTIONS_WORLD * 5)
+	ktraits.fill(Tuning.KTRAIT_INIT)
+	relations = PackedFloat32Array()
+	relations.resize(Tuning.MAX_FACTIONS_WORLD * Tuning.MAX_FACTIONS_WORLD)
+	relations.fill(0.0)
+	faction_alive = PackedByteArray()
+	faction_alive.resize(Tuning.MAX_FACTIONS_WORLD)
+	faction_alive.fill(0)
+	faction_color = PackedInt32Array()
+	faction_color.resize(Tuning.MAX_FACTIONS_WORLD)
+	for f in range(Tuning.MAX_FACTIONS_WORLD):
+		faction_color[f] = f % 8
+	faction_names = []
 
 
 # Passable 8-neighbours of `tile`, clockwise from north.
@@ -154,9 +180,8 @@ static func create(seed: int) -> World:
 				var weapon := w.rng.randi_range(0, 4)
 				w.units.add(fi, 0, weapon, false, stack_id)
 
-			var captain_name := NameGen.captain_name(w.rng)
 			var captain_id := w.units.add(fi, 1, 1, true, stack_id)
-			w.units.names[captain_id] = captain_name
+			Lineage.make_captain(w, captain_id, NameGen.captain_name_base(w.rng))
 			w.stacks.captain_unit[stack_id] = captain_id
 			w.stacks.count[stack_id] = unit_count + 1
 
@@ -178,6 +203,26 @@ static func create(seed: int) -> World:
 			order[j] = tmp
 		w.plinko_order.append(order)
 	w.plinko_log = []
+
+	# M5 kingdom fields: faction_names drawn after plinko orders so stack-
+	# and plinko-building draws stay stable regardless of naming changes.
+	w.ktraits = PackedFloat32Array()
+	w.ktraits.resize(Tuning.MAX_FACTIONS_WORLD * 5)
+	w.ktraits.fill(Tuning.KTRAIT_INIT)
+	w.relations = PackedFloat32Array()
+	w.relations.resize(Tuning.MAX_FACTIONS_WORLD * Tuning.MAX_FACTIONS_WORLD)
+	w.relations.fill(0.0)
+	w.faction_alive = PackedByteArray()
+	w.faction_alive.resize(Tuning.MAX_FACTIONS_WORLD)
+	for f in range(Tuning.MAX_FACTIONS_WORLD):
+		w.faction_alive[f] = 1 if f < w.faction_count else 0
+	w.faction_color = PackedInt32Array()
+	w.faction_color.resize(Tuning.MAX_FACTIONS_WORLD)
+	for f in range(Tuning.MAX_FACTIONS_WORLD):
+		w.faction_color[f] = f % 8
+	w.faction_names = []
+	for _f in range(w.faction_count):
+		w.faction_names.append(NameGen.kingdom_name(w.rng))
 
 	w.recompute_borders()
 
@@ -253,7 +298,36 @@ func add_town(tile: Vector2i, owner: int) -> int:
 	return id
 
 
+## Resizes town_state/town_pop/town_recruit/town_timer up to towns.size(),
+## filling new entries with 0 / TOWN_POP_START / 0.0 / 0.0. Never shrinks,
+## never overwrites existing entries. Covers callers (e.g. tests) that
+## append to towns/town_owner directly without going through add_town.
+func sync_town_arrays() -> void:
+	var n := towns.size()
+	if town_state.size() < n:
+		var old := town_state.size()
+		town_state.resize(n)
+		for i in range(old, n):
+			town_state[i] = 0
+	if town_pop.size() < n:
+		var old := town_pop.size()
+		town_pop.resize(n)
+		for i in range(old, n):
+			town_pop[i] = Tuning.TOWN_POP_START
+	if town_recruit.size() < n:
+		var old := town_recruit.size()
+		town_recruit.resize(n)
+		for i in range(old, n):
+			town_recruit[i] = 0.0
+	if town_timer.size() < n:
+		var old := town_timer.size()
+		town_timer.resize(n)
+		for i in range(old, n):
+			town_timer[i] = 0.0
+
+
 func recompute_borders() -> void:
+	sync_town_arrays()
 	for ty in range(map.rows):
 		for tx in range(map.cols):
 			var i := map.idx(tx, ty)
@@ -274,3 +348,32 @@ func recompute_borders() -> void:
 					best_owner = owner
 			map.owner[i] = best_owner
 	borders_version += 1
+
+
+func ktrait(f: int, k: int) -> float:
+	return ktraits[f * 5 + k]
+
+
+func add_ktrait(f: int, k: int, d: float) -> void:
+	ktraits[f * 5 + k] = clampf(ktraits[f * 5 + k] + d, 0.0, 1.0)
+
+
+func relation(a: int, b: int) -> float:
+	return relations[a * Tuning.MAX_FACTIONS_WORLD + b]
+
+
+func add_relation(a: int, b: int, d: float) -> void:
+	var v := clampf(relation(a, b) + d, -1.0, 1.0)
+	relations[a * Tuning.MAX_FACTIONS_WORLD + b] = v
+	relations[b * Tuning.MAX_FACTIONS_WORLD + a] = v
+
+
+func allied(a: int, b: int) -> bool:
+	return relation(a, b) >= Tuning.REL_ALLY_THRESHOLD
+
+
+## Appends a log line, keeping only the last 200 entries.
+func log_event(text: String) -> void:
+	events_log.append(text)
+	while events_log.size() > 200:
+		events_log.pop_front()

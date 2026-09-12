@@ -11,6 +11,8 @@ var map_layer: MapLayer
 var stack_layer: StackLayer
 var label_pool: LabelPool
 var battle_view: BattleView
+var ledger_panel: LedgerPanel
+var plinko_view: PlinkoView
 var camera: Camera2D
 var hud: Label
 
@@ -70,6 +72,16 @@ func _ready() -> void:
 	battle_view = BattleView.new()
 	battle_view.name = "BattleView"
 	add_child(battle_view)
+
+	ledger_panel = LedgerPanel.new()
+	ledger_panel.name = "LedgerPanel"
+	add_child(ledger_panel)
+	ledger_panel.build(world)
+
+	plinko_view = PlinkoView.new()
+	plinko_view.name = "PlinkoView"
+	add_child(plinko_view)
+	plinko_view.build(world)
 
 	hud = Label.new()
 	hud.position = Vector2(8, 8)

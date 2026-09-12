@@ -156,6 +156,7 @@ static func join(inst: BattleInstance, world: World, stack: int) -> bool:
 		state.hp[i] = state.hp_max[i] * units.hp_frac[u]
 		state.xp[i] = units.xp[u]
 		state.kills[i] = units.kills[u]
+		state.spin_cap[i] += Tuning.DRILL_SPIN_BONUS * units.drill[u]
 		inst.unit_of.append(i)
 
 	if prev_captain >= 0:
@@ -196,6 +197,14 @@ static func finish(inst: BattleInstance, world: World) -> Dictionary:
 	if local_winner >= 0:
 		winner_world = inst.faction_map[local_winner]
 
+	# UNDECIDED: the fiat event format "%s beat %s at (%d,%d)" doesn't say
+	# which stack's name fills each %s when a side has several stacks (or
+	# what to log for a stalemate, local_winner == -2) — using the first
+	# winning stack's name vs the first losing stack's name, and skipping
+	# the event entirely when there is no winner.
+	var winner_name := ""
+	var loser_name := ""
+
 	for stack in inst.stack_ids:
 		var wf: int = stacks.faction[stack]
 		var e := -1
@@ -206,9 +215,13 @@ static func finish(inst: BattleInstance, world: World) -> Dictionary:
 
 		var is_winner: bool = local_winner >= 0 and e == local_winner
 		if is_winner:
+			if winner_name == "":
+				winner_name = stacks.names[stack]
 			stacks.state[stack] = Stacks.State.IDLE
 			stacks.idle_timer[stack] = Tuning.IDLE_AFTER_BATTLE
 		else:
+			if loser_name == "":
+				loser_name = stacks.names[stack]
 			stacks.state[stack] = Stacks.State.RETREATING
 			stacks.immunity[stack] = Tuning.RETREAT_IMMUNITY
 			var town_id := world.nearest_town(stacks.x[stack], stacks.y[stack], wf, 0)
@@ -226,6 +239,12 @@ static func finish(inst: BattleInstance, world: World) -> Dictionary:
 			stacks.alive[stack] = 0
 
 	world.scars.append([inst.tile.x, inst.tile.y, dead_count, world.time])
+
+	if winner_world != -1:
+		world.events_log.append("%s beat %s at (%d,%d)" % [winner_name, loser_name, inst.tile.x, inst.tile.y])
+		if world.events_log.size() > 200:
+			world.events_log.pop_front()
+
 	world.battles.erase(inst)
 
 	return {

@@ -13,6 +13,12 @@ var hp_frac: PackedFloat32Array
 var alive: PackedByteArray
 var is_captain: PackedByteArray
 var drill: PackedByteArray          # 0..3, DRILL outcome level (M4)
+var ctrait: PackedInt32Array         # -1 none; Lineage.Trait { CHARGER=0, CAUTIOUS=1, TYRANT=2, BUILDER=3 } (M5)
+var c_fights: PackedInt32Array      # behaviour counters, captains only (M5)
+var c_retreats: PackedInt32Array
+var c_razes: PackedInt32Array
+var c_settles: PackedInt32Array
+var dynasty: Dictionary = {}        # unit id -> [name: String, numeral: int] (M5)
 var names: Dictionary = {}
 
 
@@ -30,6 +36,11 @@ func _init(capacity: int) -> void:
 	alive.resize(capacity)
 	is_captain.resize(capacity)
 	drill.resize(capacity)
+	ctrait.resize(capacity)
+	c_fights.resize(capacity)
+	c_retreats.resize(capacity)
+	c_razes.resize(capacity)
+	c_settles.resize(capacity)
 
 	faction.fill(0)
 	rank.fill(0)
@@ -41,8 +52,14 @@ func _init(capacity: int) -> void:
 	alive.fill(0)
 	is_captain.fill(0)
 	drill.fill(0)
+	ctrait.fill(-1)
+	c_fights.fill(0)
+	c_retreats.fill(0)
+	c_razes.fill(0)
+	c_settles.fill(0)
 
 	names = {}
+	dynasty = {}
 
 
 func add(faction_: int, rank_: int, weapon_: int, captain: bool, stack_: int) -> int:

@@ -9,6 +9,7 @@ const CAPTURE_TIME := 3.0   # fiat: seconds an IDLE stack must occupy a neutral 
 
 
 static func step(w: World, dt: float) -> void:
+	w.sync_town_arrays()
 	for i in range(w.towns.size()):
 		match w.town_state[i]:
 			STATE_INTACT:

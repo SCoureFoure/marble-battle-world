@@ -797,7 +797,7 @@ returns a one-line log text. Rules (fiat):
   TOWN_RECRUIT_RANGE: `n = min(n, floor(pop))`, `pop -= n`; else (wilds)
   `n = n / 2`. Adds `n` units (rank 0, weapon rng, stack = this) up to STACK_CAP.
 - RAID: nearest enemy town within RAID_RANGE → state RAIDED, `owner = -1`,
-  `pop *= 0.5`; every unit of the stack `xp += 5`; recompute borders.
+  `pop *= 0.5`, `timer = RAID_RECOVER`; every unit of the stack `xp += 5`; recompute borders.
 - RAZE: nearest enemy town within RAID_RANGE → state RAZED, `owner = -1`,
   `pop = 0`, `raze_timer = RAZE_RECOVER`, map tile kind → RUIN; recompute borders.
 - FORGE: the FORGE_N lowest-rank alive units of the stack get `rank += 1` (cap 3).
@@ -866,3 +866,134 @@ town id), else -1. MOUNTAIN tiles stay -1. Called on every ownership change
   from `Plinko.Slot` names, slot_order) and animates the recorded path
   over 2 s, then shows the outcome text for 3 s. Only the newest
   `plinko_log` entry is shown; older ones are skipped.
+
+## 13. M5 — meta progression (lineage, traits, kingdoms, relations)
+
+### 13.1 Tuning additions (fiat)
+
+```
+TRAIT_THRESHOLD = 3              # behaviour counter value that assigns a captain trait
+HEIR_RANK_DROP = 1               # heir rank = max(1, captain rank - this)
+LEGEND_RANK = 3
+KTRAIT_INIT = 0.5                # every kingdom trait starts here; clamped 0..1
+KT_WIN_AGGR = 0.02
+KT_RAZE_GREED = 0.05
+KT_RAZE_PIETY = -0.03
+KT_SETTLE_COH = 0.03
+KT_RETREAT_AGGR = -0.02
+KT_RETREAT_COH = -0.02
+KT_PILGRIM_PIETY = 0.05
+PLINKO_BIAS_GREED = 200.0        # plinko_bias = (greed - 0.5) * this
+GOAL_PILGRIMAGE_BASE = 0.5
+GOAL_AVENGE_BASE = 0.5
+REL_CAPTAIN_KILLED = -0.5
+REL_BATTLE_LOST = -0.1
+REL_ALLY_THRESHOLD = 0.5
+REL_DIPLOMACY_RATE = 0.01        # per second between bordering factions both with diplomacy > 0.6
+REL_DECAY = 0.002                # per second toward 0
+SPLIT_UNITS = 600
+SPLIT_COHESION = 0.3
+MAX_FACTIONS_WORLD = 16
+```
+
+### 13.2 Units / World fields
+
+`Units` gains: `ctrait: PackedInt32Array` (-1 none; `enum Trait { CHARGER = 0, CAUTIOUS = 1, TYRANT = 2, BUILDER = 3 }`),
+`c_fights, c_retreats, c_razes, c_settles: PackedInt32Array` (behaviour
+counters, captains only), `dynasty: Dictionary` unit id → `[name: String, numeral: int]`.
+
+`World` gains: `ktraits: PackedFloat32Array` (size MAX_FACTIONS_WORLD*5:
+index `f*5 + k`, k: 0 aggression, 1 diplomacy, 2 greed, 3 piety, 4 cohesion),
+`relations: PackedFloat32Array` (MAX_FACTIONS_WORLD², 0.0), `faction_alive: PackedByteArray`
+(1 while the faction has towns or stacks), `faction_color: PackedInt32Array`
+(index into FACTION_COLORS, `f % 8` at creation), `faction_names: Array` of String
+(`NameGen.kingdom_name(rng)` = onset+onset+"ia"/"mark"/"land").
+Helpers: `ktrait(f, k) -> float`, `add_ktrait(f, k, d)` (clamped),
+`relation(a, b) -> float`, `add_relation(a, b, d)` (symmetric, clamped -1..1),
+`allied(a, b) -> bool` (`relation >= REL_ALLY_THRESHOLD`).
+
+### 13.3 Lineage (`scripts/world/lineage.gd`, `class_name Lineage`)
+
+- `static func numeral(n: int) -> String` — Roman numerals 1..3999.
+- `static func on_battle_finished(w, inst, result)`: for every stack in the
+  battle: captain alive → `c_fights += 1`; stack RETREATING → `c_retreats += 1`
+  on its captain (if alive). If the stack's captain died (unit dead and
+  `captain_unit` pointed at it): heir = alive unit of the stack with most
+  kills (ties lowest id); `is_captain = 1`; `rank = max(1, old_rank - HEIR_RANK_DROP)`;
+  `xp = old_xp / 2`; `ctrait` inherited from the dead captain; dynasty
+  `[name, numeral + 1]`, `names[heir] = "%s %s" % [name, numeral(n)]`;
+  `stacks.captain_unit = heir`; `events_log` line `"<name> <numeral> fell; <heir name> rises"`.
+  No alive unit → `captain_unit = -1` (stack dies anyway when count 0).
+- `static func note_settle(w, captain_unit)` / `note_raze(w, captain_unit)`:
+  counters, called by `PlinkoOutcomes` SETTLE/RAZE.
+- `static func update_trait(w, u)`: after any counter change: the largest
+  counter ≥ TRAIT_THRESHOLD sets `ctrait` (fights → CHARGER, retreats →
+  CAUTIOUS, razes → TYRANT, settles → BUILDER); never downgrades (only
+  changes when a different counter exceeds the current ctrait's counter).
+- Legend naming (`static func check_legend(w, u)`), called by the bridge
+  copy-back when `rank` becomes LEGEND_RANK: `names[u] = NameGen.legend_name(w.rng, kills)`
+  = `"<Adjective> <Name>, killer of <kills>"` (adjectives fiat: Mudslide,
+  Ironhand, Redspin, Grim, Quiet, Wolfish, Brassbound, Hollow).
+- Captain creation everywhere (`World.create`, HEIR outcome, town garrisons)
+  goes through `Lineage.make_captain(w, u, name_base)` which sets dynasty
+  `[name_base, 1]` and `names[u] = name_base + " I"`.
+
+### 13.4 Kingdoms (`scripts/world/kingdoms.gd`, `class_name Kingdoms`)
+
+- `static func on_event(w, kind: String, faction: int)`: applies the
+  KT_* deltas: "win" (aggression), "raze" (greed +, piety −), "settle"
+  (cohesion), "retreat" (aggression −, cohesion −), "pilgrim" (piety).
+- `static func goal_weights(w, f) -> PackedFloat32Array` (7 entries, Goal
+  order below): `[HUNT_WEAK: 3*(0.5+aggr), EXPAND: 3*(1.5-aggr), RAID: 2*(0.5+greed),
+  DEFEND: 1*(0.5+coh), IDLE_HEAL: 1, PILGRIMAGE: GOAL_PILGRIMAGE_BASE + piety,
+  AVENGE: GOAL_AVENGE_BASE + max(0, -min relation with any alive faction)]`.
+  `Stacks.Goal` gains `PILGRIMAGE = 5` (nearest RUIN or GRAVEYARD tile;
+  arrival → `on_event("pilgrim")`, then IDLE) and `AVENGE = 6` (nearest stack
+  of the most-hated faction, i.e. lowest relation < 0; none → falls back).
+- `static func recruit_weapon(w, f, rng) -> int`: weights per weapon id
+  `[dagger 1+aggr, sword 1, spear 1+coh, axe 1+aggr, shield 1+coh]`.
+  Used by TownSim recruits and RECRUIT outcome.
+- `static func plinko_bias(w, f) -> float` = `(greed - 0.5) * PLINKO_BIAS_GREED`
+  (written into `w.plinko_bias[f]` by `tick`).
+- `static func trait_favor(order: PackedInt32Array, trait: int) -> PackedInt32Array`:
+  copy with the favoured slot moved to index 4 (CHARGER → RECRUIT, CAUTIOUS →
+  DRILL, TYRANT → RAZE, BUILDER → SETTLE); -1 → unchanged. WorldSim applies
+  it to the board's `slot_order` using the dropping stack's captain ctrait.
+- `static func tick(w, dt)` (every world tick, cheap): relations decay
+  toward 0 by REL_DECAY*dt; bordering factions (some tile owned by a has a
+  4-neighbour owned by b — recomputed only when `borders_version` changes,
+  cached as a PackedByteArray adjacency) with both diplomacy > 0.6 gain
+  REL_DIPLOMACY_RATE*dt; refresh `plinko_bias`.
+- Relations on battle finish (`static func on_battle_finished(w, inst, result)`):
+  each losing world faction `add_relation(loser, winner, REL_BATTLE_LOST)`;
+  each captain killed → `add_relation(victim_faction, killer_faction, REL_CAPTAIN_KILLED)`
+  (killer faction = world faction of the marble whose KILL event targeted the captain:
+  the bridge records `captain_killers: Array` of `[victim_world_f, killer_world_f]` from
+  `CAPTAIN_DEAD` events during the battle).
+- `static func check_split(w)`: for each alive faction with alive units >
+  SPLIT_UNITS and cohesion < SPLIT_COHESION and `faction_count < MAX_FACTIONS_WORLD`:
+  the largest stack becomes a new faction `g = faction_count++` (its units
+  re-flagged, `faction_color[g] = g % 8`, name new, ktraits copied with
+  cohesion reset to KTRAIT_INIT), the nearest town owned by the old faction
+  within 6 tiles (if any) flips to `g`, `add_relation(f, g, -0.6)`, both
+  stacks get `immunity = RETREAT_IMMUNITY`, event logged, borders recomputed.
+  Once per 30 s of world time per faction at most (`split_cooldown` array).
+- `static func check_death(w)`: an alive faction with zero towns and zero
+  alive stacks → `faction_alive = 0`, event `"Kingdom <name> fell"`.
+- Rebirth + mercenaries live in `BattleBridge.finish`: when a losing
+  faction's last stack is destroyed (count 0) and that faction has zero
+  towns: units that survived (fled) are re-homed — if any survivor has
+  `rank >= LEGEND_RANK`: they form a new stack of a **new faction** at the
+  nearest RUIN tile (name from NameGen, colour `g % 8`, ktraits init),
+  event `"<legend name> founds <kingdom>"`; else they join the winner stack
+  (faction re-flagged, `stack` reassigned) as mercenaries, event logged.
+
+### 13.5 Allies in battle
+
+`BattleBridge.join`: if some already-joined local faction's world faction is
+allied with the joining stack's world faction, the stack joins **that**
+local index (same edge, same side). `finish`: the winning local side's
+world faction = the world faction of the joined stack with the most
+survivors on that side; every stack on the winning side is a winner
+(IDLE), every stack on other sides a loser. Plinko drops go to every winner
+stack with a captain. `result` gains `"winner_side": local index`.

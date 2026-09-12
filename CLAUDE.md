@@ -7,4 +7,5 @@
 - Tests: `bash tools/verify.sh <test_basename>` — green needs exit 0 + `ALL_PASS` + no parse error.
 - New `class_name` scripts need `--import` once; `verify.sh` does it.
 - Tabs in `.gd` files.
-- GDScript pitfalls seen here: `var x := Tuning.SOME_ARRAY[k]` fails (cannot infer from an untyped Array element) — write `var x: float = ...`; a name declared with `var` cannot be re-declared or reused as a `for` variable in the same function scope.
+- GDScript pitfalls seen here: `var x := Tuning.SOME_ARRAY[k]` fails (cannot infer from an untyped Array element) — write `var x: float = ...`; a name declared with `var` cannot be re-declared or reused as a `for` variable in the same function scope; `trait` is a reserved word in GDScript 4, so the Units field is `ctrait`.
+
