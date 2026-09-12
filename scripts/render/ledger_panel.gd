@@ -20,6 +20,12 @@ func build(w: World) -> void:
 	_panel = PanelContainer.new()
 	_panel.name = "LedgerPanelContainer"
 	_panel.custom_minimum_size = Vector2(PANEL_WIDTH, 0.0)
+	# m6-ui.md §fiat / ARCHITECTURE.md §14.4: anchored to the right edge so it
+	# never clips regardless of window size, replacing the old manual
+	# get_visible_rect()-based positioning.
+	_panel.anchor_right = 1.0
+	_panel.offset_left = -270.0
+	_panel.offset_right = 0.0
 	add_child(_panel)
 
 	_vbox = VBoxContainer.new()
@@ -27,14 +33,7 @@ func build(w: World) -> void:
 	_panel.add_child(_vbox)
 
 	_build_rows()
-	_position_panel()
 	_refresh()
-
-
-func _position_panel() -> void:
-	var vp := get_viewport()
-	var size: Vector2 = vp.get_visible_rect().size if vp != null else Vector2(1280.0, 720.0)
-	_panel.position = Vector2(size.x - PANEL_WIDTH, 0.0)
 
 
 func _build_rows() -> void:
@@ -88,11 +87,11 @@ func _refresh() -> void:
 		var swatch: ColorRect = row["swatch"]
 		var label: Label = row["label"]
 		swatch.color = Tuning.FACTION_COLORS[f % Tuning.FACTION_COLORS.size()]
-		# UNDECIDED: the row text format "%s ... units %d towns %d stacks %d"
-		# (m4-render.md §fiat) has no faction-name source anywhere in the
-		# codebase (no `World` faction-name array/method); using "Faction %d"
-		# as the %s placeholder.
-		var faction_label := "Faction %d" % f
+		# m6-ui.md §fiat / ARCHITECTURE.md §14.4: faction rows show
+		# faction_names (M5 field); World.create fills it, but hand-built
+		# test worlds via setup_blank leave it empty, so fall back to the
+		# old "Faction %d" placeholder when there is no entry.
+		var faction_label: String = world.faction_names[f] if f < world.faction_names.size() else "Faction %d" % f
 		if r == 0:
 			label.text = "%s  ♛ units %d  towns %d  stacks %d" % [faction_label, e["units"], e["towns"], e["stacks"]]
 		else:

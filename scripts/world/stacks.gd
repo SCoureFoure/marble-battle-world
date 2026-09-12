@@ -2,7 +2,7 @@ class_name Stacks extends RefCounted
 ## Marching unit stacks on the overworld. SoA per docs/ARCHITECTURE.md §11.3.
 
 enum State { IDLE = 0, MOVING = 1, BATTLE = 2, RETREATING = 3 }
-enum Goal { HUNT_WEAK = 0, EXPAND = 1, RAID = 2, DEFEND = 3, IDLE_HEAL = 4 }
+enum Goal { HUNT_WEAK = 0, EXPAND = 1, RAID = 2, DEFEND = 3, IDLE_HEAL = 4, PILGRIMAGE = 5, AVENGE = 6 }
 
 var n: int = 0
 var cap: int

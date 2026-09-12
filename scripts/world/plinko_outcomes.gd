@@ -112,6 +112,12 @@ static func _settle(w: World, stack: int, f: int) -> String:
 	for u in range(w.units.n):
 		if w.units.stack[u] == stack and w.units.alive[u] == 1:
 			w.units.hp_frac[u] = 1.0
+	# UNDECIDED: the fork tag ("SETTLE -> Lineage.note_settle(w, captain_unit)",
+	# "outcomes call Kingdoms.on_event: SETTLE -> 'settle'") doesn't say
+	# whether the kingdom-trait bump / behaviour counter should still apply
+	# when no town was found (heal-only) -- both called unconditionally here.
+	Kingdoms.on_event(w, "settle", f)
+	Lineage.note_settle(w, w.stacks.captain_unit[stack])
 	return "%s: SETTLE took %d" % [w.stacks.names[stack], town]
 
 
@@ -128,7 +134,7 @@ static func _recruit(w: World, stack: int, f: int) -> String:
 	for _i in range(n):
 		if w.stacks.count[stack] >= Tuning.STACK_CAP:
 			break
-		var weapon := w.rng.randi_range(0, 4)
+		var weapon := Kingdoms.recruit_weapon(w, f, w.rng)
 		w.units.add(f, 0, weapon, false, stack)
 		w.stacks.count[stack] += 1
 		added += 1
@@ -159,6 +165,10 @@ static func _raze(w: World, stack: int, f: int) -> String:
 		var t := Vector2i(int(w.towns[town].x), int(w.towns[town].y))
 		w.map.kind[w.map.idx(t.x, t.y)] = WorldMap.Kind.RUIN
 		w.recompute_borders()
+	# UNDECIDED: same as SETTLE above -- both called unconditionally, even
+	# when no enemy town was in range.
+	Kingdoms.on_event(w, "raze", f)
+	Lineage.note_raze(w, w.stacks.captain_unit[stack])
 	return "%s: RAZE took %d" % [w.stacks.names[stack], town]
 
 
@@ -212,8 +222,12 @@ static func _heir(w: World, stack: int) -> String:
 					best_kills = w.units.kills[u]
 					best = u
 		if best != -1:
-			w.units.is_captain[best] = 1
-			w.units.names[best] = NameGen.captain_name(w.rng)
+			var name_base: String
+			if cap != -1 and w.units.dynasty.has(cap):
+				name_base = w.units.dynasty[cap][0]
+			else:
+				name_base = NameGen.captain_name_base(w.rng)
+			Lineage.make_captain(w, best, name_base)
 			w.stacks.captain_unit[stack] = best
 	return "%s: HEIR took heir" % w.stacks.names[stack]
 

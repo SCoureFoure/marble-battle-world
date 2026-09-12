@@ -30,6 +30,11 @@ var relations: PackedFloat32Array   # size MAX_FACTIONS_WORLD^2; index a*MAX_FAC
 var faction_alive: PackedByteArray  # 1 while the faction has towns or stacks (M5)
 var faction_color: PackedInt32Array # index into Tuning.FACTION_COLORS, f % 8 at creation (M5)
 var faction_names: Array            # String per faction, NameGen.kingdom_name (M5)
+var border_adj: PackedByteArray     # size MAX_FACTIONS_WORLD^2 adjacency cache (M5)
+var border_adj_version: int = -1    # borders_version this cache was built from (M5)
+var split_cooldown: PackedFloat32Array # per faction, seconds until check_split may split again (M5)
+var meta_timer: float = 0.0         # accumulator: Kingdoms.check_split/check_death once per world second (M5)
+var watched_battle: int = -1        # BattleInstance.id being watched full-sim, -1 none (M6)
 
 # Clockwise from north: N, NE, E, SE, S, SW, W, NW.
 const NEIGHBOR_DIRS := [
@@ -66,6 +71,9 @@ func _init() -> void:
 	faction_alive = PackedByteArray()
 	faction_color = PackedInt32Array()
 	faction_names = []
+	border_adj = PackedByteArray()
+	border_adj_version = -1
+	split_cooldown = PackedFloat32Array()
 
 
 func setup_blank(cols: int, rows: int, seed: int) -> void:
@@ -118,6 +126,14 @@ func setup_blank(cols: int, rows: int, seed: int) -> void:
 	for f in range(Tuning.MAX_FACTIONS_WORLD):
 		faction_color[f] = f % 8
 	faction_names = []
+
+	border_adj = PackedByteArray()
+	border_adj.resize(Tuning.MAX_FACTIONS_WORLD * Tuning.MAX_FACTIONS_WORLD)
+	border_adj_version = -1
+	split_cooldown = PackedFloat32Array()
+	split_cooldown.resize(Tuning.MAX_FACTIONS_WORLD)
+	split_cooldown.fill(0.0)
+	meta_timer = 0.0
 
 
 # Passable 8-neighbours of `tile`, clockwise from north.
@@ -223,6 +239,14 @@ static func create(seed: int) -> World:
 	w.faction_names = []
 	for _f in range(w.faction_count):
 		w.faction_names.append(NameGen.kingdom_name(w.rng))
+
+	w.border_adj = PackedByteArray()
+	w.border_adj.resize(Tuning.MAX_FACTIONS_WORLD * Tuning.MAX_FACTIONS_WORLD)
+	w.border_adj_version = -1
+	w.split_cooldown = PackedFloat32Array()
+	w.split_cooldown.resize(Tuning.MAX_FACTIONS_WORLD)
+	w.split_cooldown.fill(0.0)
+	w.meta_timer = 0.0
 
 	w.recompute_borders()
 

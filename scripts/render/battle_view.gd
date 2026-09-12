@@ -7,6 +7,8 @@ extends CanvasLayer
 ## .warboss-horde/slices/m3-world-scene.md.
 
 var inst: BattleInstance
+var world: World
+var spectate_panel: SpectatePanel
 var container: SubViewportContainer
 var viewport: SubViewport
 var camera: Camera2D
@@ -15,6 +17,8 @@ var terrain_layer: TerrainLayer
 var renderer: BattleRenderer
 var label_pool: LabelPool
 var _prev_owner: PackedInt32Array
+
+const SPECTATE_CLICK_PX := 12.0
 
 
 func _ready() -> void:
@@ -60,11 +64,15 @@ func open(instance: BattleInstance) -> void:
 	camera.zoom = Vector2(1, 1)
 	camera.make_current()
 	visible = true
+	if world != null:
+		world.watched_battle = instance.id
 
 
 func close() -> void:
 	visible = false
 	inst = null
+	if world != null:
+		world.watched_battle = -1
 
 
 func pos(i: int) -> Vector2:
@@ -117,3 +125,37 @@ func _input(event: InputEvent) -> void:
 		if mb.pressed and mb.button_index == MOUSE_BUTTON_RIGHT:
 			close()
 			get_viewport().set_input_as_handled()
+		elif mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			_try_spectate_marble(mb.position)
+
+
+## m6-ui.md §fiat: nearest marble within 12 px of the SubViewport-space
+## click. `mb.position` is in the container's local (window-scaled) space;
+## the container stretches the fixed-size viewport to fill the screen, so it
+## is rescaled to viewport pixels before comparing against marble positions
+## projected through the viewport's own canvas_transform.
+func _try_spectate_marble(container_click: Vector2) -> void:
+	if spectate_panel == null or inst == null:
+		return
+	var container_size: Vector2 = container.size
+	if container_size.x <= 0.0 or container_size.y <= 0.0:
+		return
+	var vp_click: Vector2 = container_click * (Vector2(viewport.size) / container_size)
+
+	var s := inst.state
+	var best := -1
+	var best_dist := INF
+	for i in range(s.n):
+		if s.state[i] == BattleState.State.DEAD:
+			continue
+		var vp_pos: Vector2 = viewport.canvas_transform * Vector2(s.px[i], s.py[i])
+		var d := vp_click.distance_to(vp_pos)
+		if d < best_dist:
+			best_dist = d
+			best = i
+
+	if best == -1 or best_dist > SPECTATE_CLICK_PX:
+		return
+	if best >= inst.unit_of.size():
+		return
+	spectate_panel.show_unit(world, inst.unit_of[best])

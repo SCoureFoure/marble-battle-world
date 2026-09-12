@@ -56,5 +56,8 @@ func _init() -> void:
 	t.check(Tuning.SPLIT_UNITS == 600, "Tuning.SPLIT_UNITS == 600")
 	t.check(Tuning.PLINKO_BIAS_GREED == 200.0, "Tuning.PLINKO_BIAS_GREED == 200.0")
 
+	t.check(Tuning.SAVE_VERSION == 1, "Tuning.SAVE_VERSION == 1")
+	t.check(Tuning.SPEED_STEPS.size() == 3, "Tuning.SPEED_STEPS.size() == 3")
+
 	t.finish()
 	quit()

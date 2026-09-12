@@ -17,6 +17,13 @@ static func step_world(w: World, dt: float) -> void:
 			st.idle_timer[i] -= dt
 
 	TownSim.step(w, dt)
+	Kingdoms.tick(w, dt)
+
+	w.meta_timer += dt
+	while w.meta_timer >= 1.0:
+		w.meta_timer -= 1.0
+		Kingdoms.check_split(w)
+		Kingdoms.check_death(w)
 
 	for i in range(st.n):
 		if st.alive[i] == 0:
@@ -40,14 +47,16 @@ static func step(w: World, dt: float) -> void:
 
 static func pick_goal(w: World, i: int) -> void:
 	var st := w.stacks
+	var fi := st.faction[i]
+	var weights: PackedFloat32Array = Kingdoms.goal_weights(w, fi)
 	var total := 0.0
-	for wgt in Tuning.GOAL_WEIGHTS:
+	for wgt in weights:
 		total += wgt
 	var draw: float = w.rng.randf() * total
 	var acc := 0.0
 	var goal := 0
-	for g in range(Tuning.GOAL_WEIGHTS.size()):
-		acc += Tuning.GOAL_WEIGHTS[g]
+	for g in range(weights.size()):
+		acc += weights[g]
 		if draw < acc:
 			goal = g
 			break
@@ -93,6 +102,19 @@ static func set_goal(w: World, i: int, goal: int) -> bool:
 			target_tile = Vector2i(int(w.towns[town_d].x), int(w.towns[town_d].y))
 		Stacks.Goal.IDLE_HEAL:
 			return false
+		Stacks.Goal.PILGRIMAGE:
+			var holy := _nearest_holy_tile(w, st.x[i], st.y[i])
+			if holy == Vector2i(-1, -1):
+				return false
+			target_tile = holy
+		Stacks.Goal.AVENGE:
+			var hated := _most_hated_faction(w, fi)
+			if hated == -1:
+				return false
+			var enemy_stack := _nearest_stack_of_faction(w, i, hated)
+			if enemy_stack == -1:
+				return false
+			target_tile = w.stack_tile(enemy_stack)
 		_:
 			return false
 
@@ -110,6 +132,56 @@ static func set_goal(w: World, i: int, goal: int) -> bool:
 	return true
 
 
+## PILGRIMAGE target: nearest RUIN or GRAVEYARD tile by world distance.
+static func _nearest_holy_tile(w: World, x: float, y: float) -> Vector2i:
+	var best := Vector2i(-1, -1)
+	var best_d := INF
+	for ty in range(w.map.rows):
+		for tx in range(w.map.cols):
+			var k: int = w.map.kind[w.map.idx(tx, ty)]
+			if k != WorldMap.Kind.RUIN and k != WorldMap.Kind.GRAVEYARD:
+				continue
+			var d: float = Vector2(x, y).distance_to(w.map.center_of(tx, ty))
+			if d < best_d:
+				best_d = d
+				best = Vector2i(tx, ty)
+	return best
+
+
+## AVENGE target faction: alive faction g != f with the lowest relation(f, g);
+## none with relation < 0 -> -1 (§13.4: "nearest stack of the most-hated
+## faction ... none -> falls back").
+static func _most_hated_faction(w: World, f: int) -> int:
+	var best := -1
+	var best_rel := INF
+	for g in range(Tuning.MAX_FACTIONS_WORLD):
+		if g == f or w.faction_alive[g] == 0:
+			continue
+		var r := w.relation(f, g)
+		if r < best_rel:
+			best_rel = r
+			best = g
+	if best == -1 or best_rel >= 0.0:
+		return -1
+	return best
+
+
+## Nearest alive stack of world faction `target_f` to stack `i` (world
+## distance).
+static func _nearest_stack_of_faction(w: World, i: int, target_f: int) -> int:
+	var st := w.stacks
+	var best := -1
+	var best_d := INF
+	for j in range(st.n):
+		if st.alive[j] == 0 or st.faction[j] != target_f:
+			continue
+		var d := Vector2(st.x[i], st.y[i]).distance_to(Vector2(st.x[j], st.y[j]))
+		if d < best_d:
+			best_d = d
+			best = j
+	return best
+
+
 static func move_stacks(w: World, dt: float) -> void:
 	var st := w.stacks
 	var map := w.map
@@ -124,6 +196,8 @@ static func move_stacks(w: World, dt: float) -> void:
 
 		var p: PackedVector2Array = st.path[i]
 		if st.path_i[i] >= p.size():
+			if st.goal[i] == Stacks.Goal.PILGRIMAGE:
+				Kingdoms.on_event(w, "pilgrim", st.faction[i])
 			st.state[i] = Stacks.State.IDLE
 			continue
 
@@ -143,6 +217,8 @@ static func move_stacks(w: World, dt: float) -> void:
 			st.y[i] = target.y
 			st.path_i[i] += 1
 			if st.path_i[i] >= p.size():
+				if st.goal[i] == Stacks.Goal.PILGRIMAGE:
+					Kingdoms.on_event(w, "pilgrim", st.faction[i])
 				st.state[i] = Stacks.State.IDLE
 		else:
 			var dir := to_target / dist
@@ -263,33 +339,48 @@ static func step_battles(w: World) -> void:
 	var remaining: Array = []
 	for battle in w.battles:
 		var inst: BattleInstance = battle
-		inst.sim.step(inst.state, Tuning.DT)
+		if inst.id == w.watched_battle:
+			inst.sim.step(inst.state, Tuning.DT)
+		else:
+			BattleLod.step(inst, Tuning.DT)
+
+		# Captain kills (§13.4: BattleInstance.captain_killers, relations).
+		for ev in inst.state.events:
+			if ev[0] != BattleState.Event.CAPTAIN_DEAD:
+				continue
+			var actor: int = ev[1]
+			var target: int = ev[2]
+			if actor == -1:
+				continue
+			var victim_f: int = inst.faction_map[inst.state.faction_id[target]]
+			var killer_f: int = inst.faction_map[inst.state.faction_id[actor]]
+			inst.captain_killers.append([victim_f, killer_f])
+
 		var win := inst.sim.winner(inst.state)
 		if win != -1:
-			var result := BattleBridge.finish(inst, w)
-			var winner: int = result["winner"]
-			if winner >= 0:
-				_run_plinko(w, inst, winner)
+			BattleBridge.finish(inst, w)
+			_run_plinko(w, inst)
 		else:
 			remaining.append(inst)
 	w.battles = remaining
 
 
-## After a finish with a winner: one plinko drop per winner stack with a
-## living captain (docs/ARCHITECTURE.md §12.3/§12.4 fork tags).
-static func _run_plinko(w: World, inst: BattleInstance, winner: int) -> void:
+## After a finish: one plinko drop per winner-side stack with a living
+## captain (docs/ARCHITECTURE.md §12.3/§12.4/§13.5 fork tags). Winners are
+## identified by state == IDLE (set by BattleBridge.finish); each stack drops
+## on its own faction's board, slot order favoured by its captain's ctrait.
+static func _run_plinko(w: World, inst: BattleInstance) -> void:
 	var st := w.stacks
 	for stack in inst.stack_ids:
-		if st.faction[stack] != winner:
+		if st.alive[stack] == 0 or st.state[stack] != Stacks.State.IDLE:
 			continue
-		if st.alive[stack] == 0 or st.count[stack] <= 0:
-			continue
+		var f: int = st.faction[stack]
 		var captain: int = st.captain_unit[stack]
 		if captain < 0 or w.units.alive[captain] != 1:
 			continue
 
-		var board := Plinko.build(w.plinko_rows[winner], w.plinko_bias[winner], w.rng)
-		board.slot_order = w.plinko_order[winner]
+		var board := Plinko.build(w.plinko_rows[f], w.plinko_bias[f], w.rng)
+		board.slot_order = Kingdoms.trait_favor(w.plinko_order[f], w.units.ctrait[captain])
 		var d := board.drop(Tuning.PLINKO_W * 0.5, w.rng)
 
 		var lines: Array = []

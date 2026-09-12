@@ -1,9 +1,6 @@
 class_name Lineage extends RefCounted
-## Captain lineage: Roman numerals, captain creation, legend naming.
-## docs/ARCHITECTURE.md §13.3.
-## This slice (m5-fields) implements only numeral, make_captain, check_legend.
-## Deferred to slice m5-lineage: on_battle_finished, note_settle, note_raze,
-## update_trait.
+## Captain lineage: Roman numerals, captain creation, legend naming,
+## succession and behaviour-counter traits. docs/ARCHITECTURE.md §13.3.
 
 enum Trait { CHARGER = 0, CAUTIOUS = 1, TYRANT = 2, BUILDER = 3 }
 
@@ -35,3 +32,106 @@ static func check_legend(w: World, u: int) -> void:
 	if w.units.rank[u] != Tuning.LEGEND_RANK:
 		return
 	w.units.names[u] = NameGen.legend_name(w.rng, w.units.kills[u])
+
+
+## After any behaviour-counter change: the largest counter >= TRAIT_THRESHOLD
+## sets ctrait (fights -> CHARGER, retreats -> CAUTIOUS, razes -> TYRANT,
+## settles -> BUILDER). Never downgrades: only changes when a different
+## counter strictly exceeds the current ctrait's own counter value (a tie
+## leaves ctrait unchanged).
+static func update_trait(w: World, u: int) -> void:
+	var counters := {
+		Trait.CHARGER: w.units.c_fights[u],
+		Trait.CAUTIOUS: w.units.c_retreats[u],
+		Trait.TYRANT: w.units.c_razes[u],
+		Trait.BUILDER: w.units.c_settles[u]
+	}
+	var current: int = w.units.ctrait[u]
+	var current_count := 0
+	if current != -1:
+		current_count = counters[current]
+
+	var best_trait := -1
+	var best_count := -1
+	for trait_id in counters:
+		var c: int = counters[trait_id]
+		if c < Tuning.TRAIT_THRESHOLD:
+			continue
+		if c > best_count:
+			best_count = c
+			best_trait = trait_id
+
+	if best_trait != -1 and best_count > current_count:
+		w.units.ctrait[u] = best_trait
+
+
+## Behaviour counters, captains only. Called by PlinkoOutcomes SETTLE/RAZE.
+static func note_settle(w: World, captain_unit: int) -> void:
+	if captain_unit == -1:
+		return
+	w.units.c_settles[captain_unit] += 1
+	update_trait(w, captain_unit)
+
+
+static func note_raze(w: World, captain_unit: int) -> void:
+	if captain_unit == -1:
+		return
+	w.units.c_razes[captain_unit] += 1
+	update_trait(w, captain_unit)
+
+
+## Called by BattleBridge.finish at the end, before returning, for every
+## stack that took part in `inst`. `inst.captain_before` (parallel to
+## `inst.stack_ids`) holds each stack's captain unit id as it was before the
+## copy-back, so a captain's death (Units.kill already ran) can be detected
+## here.
+static func on_battle_finished(w: World, inst: BattleInstance, result: Dictionary) -> void:
+	for idx in range(inst.stack_ids.size()):
+		var stack: int = inst.stack_ids[idx]
+		var captain_before: int = inst.captain_before[idx]
+		var captain_alive: bool = captain_before != -1 and w.units.alive[captain_before] == 1
+
+		if captain_alive:
+			w.units.c_fights[captain_before] += 1
+			update_trait(w, captain_before)
+			if w.stacks.state[stack] == Stacks.State.RETREATING:
+				w.units.c_retreats[captain_before] += 1
+				update_trait(w, captain_before)
+		elif captain_before != -1:
+			_succeed(w, stack, captain_before)
+
+
+## Heir = alive unit of `stack`, not the (already dead) captain, with the
+## most kills; ties -> lowest id. No candidate -> captain_unit = -1 (the
+## stack dies anyway once its count reaches 0).
+static func _succeed(w: World, stack: int, dead_captain: int) -> void:
+	var best := -1
+	var best_kills := -1
+	for u in range(w.units.n):
+		if w.units.stack[u] == stack and w.units.alive[u] == 1 and w.units.is_captain[u] == 0:
+			if w.units.kills[u] > best_kills:
+				best_kills = w.units.kills[u]
+				best = u
+
+	if best == -1:
+		w.stacks.captain_unit[stack] = -1
+		return
+
+	var dyn: Array = w.units.dynasty.get(dead_captain, ["", 0])
+	var name: String = dyn[0]
+	var old_numeral: int = int(dyn[1])
+	var new_numeral := old_numeral + 1
+
+	w.units.is_captain[best] = 1
+	w.units.rank[best] = maxi(1, w.units.rank[dead_captain] - Tuning.HEIR_RANK_DROP)
+	w.units.xp[best] = w.units.xp[dead_captain] / 2
+	w.units.ctrait[best] = w.units.ctrait[dead_captain]
+	w.units.c_fights[best] = 0
+	w.units.c_retreats[best] = 0
+	w.units.c_razes[best] = 0
+	w.units.c_settles[best] = 0
+	w.units.dynasty[best] = [name, new_numeral]
+	w.units.names[best] = "%s %s" % [name, numeral(new_numeral)]
+	w.stacks.captain_unit[stack] = best
+
+	w.log_event("%s %s fell; %s rises" % [name, numeral(old_numeral), w.units.names[best]])

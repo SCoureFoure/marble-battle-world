@@ -49,7 +49,7 @@ static func _recruit(w: World, town_id: int, dt: float) -> void:
 			target = w.stacks.add(f, c.x, c.y, NameGen.stack_name(w.rng))
 			w.stacks.goal[target] = Stacks.Goal.DEFEND
 
-		var weapon := w.rng.randi_range(0, 4)
+		var weapon := Kingdoms.recruit_weapon(w, f, w.rng)
 		w.units.add(f, 0, weapon, false, target)
 		w.stacks.count[target] += 1
 

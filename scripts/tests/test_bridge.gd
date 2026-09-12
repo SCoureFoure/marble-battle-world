@@ -193,6 +193,11 @@ func _init() -> void:
 				inst7.state.state[i7] = BattleState.State.DEAD
 	var fled_u7 := inst7.unit_of[fled_i]
 
+	# Give faction 1 a town so the M5 rebirth/mercenary rule (last stack
+	# destroyed with no towns) doesn't re-home the fled survivor here.
+	w7.add_town(Vector2i(1, 1), 1)
+	w7.recompute_borders()
+
 	var result7 := BattleBridge.finish(inst7, w7)
 	t.check(result7["winner"] == 0, "case7 winner == 0")
 	t.check(w7.units.alive[fled_u7] == 1, "case7 fled unit alive")

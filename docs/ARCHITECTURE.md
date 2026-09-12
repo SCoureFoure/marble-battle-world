@@ -997,3 +997,88 @@ world faction = the world faction of the joined stack with the most
 survivors on that side; every stack on the winning side is a winner
 (IDLE), every stack on other sides a loser. Plinko drops go to every winner
 stack with a captain. `result` gains `"winner_side": local index`.
+
+## 14. M6 — battle LOD, save/load, time controls, spectate, timeline
+
+### 14.1 Tuning additions (fiat)
+
+```
+LOD_K = 0.25                     # Lanchester damage scale: dmg/s per side = K * Σ(spin/SPIN_REF * RANK_MULT * WEAPON_DMG / WEAPON_COOLDOWN) (≈ contact fraction of a side)
+LOD_XP_PER_DMG = 0.125           # xp credited per damage point dealt (≈ XP_PER_HIT per 8 dmg)
+LOD_FLEE_TIME = 5.0              # seconds in RETREAT before a marble counts as fled under LOD
+SAVE_VERSION = 1
+SPEED_STEPS = [1, 5, 50]         # steps per frame for x1 / x5 / x50; "max" fits steps into MAX_FRAME_MS
+MAX_FRAME_MS = 12.0
+TIMELINE_LINES = 12
+```
+
+### 14.2 BattleLod (`scripts/world/battle_lod.gd`, `class_name BattleLod`)
+
+`static func step(inst: BattleInstance, dt: float) -> void` — the
+statistical stand-in for `BattleSim.step` when a battle is not being
+watched. Operates on the same `BattleState`; positions are left untouched
+(they stay where the last full-sim tick or the spawn put them).
+
+1. Per local side `s` (0..3): `rate[s] = LOD_K * Σ_{i live, ENGAGE, faction i == s} spin[i]/SPIN_REF * RANK_MULT[rank[i]] * WEAPON_DMG[w]/WEAPON_COOLDOWN[w]`.
+2. For each side `s` with `rate[s] > 0`: total damage `D = rate[s] * dt`
+   distributed over enemy sides in proportion to their live counts; within
+   an enemy side pick targets with `state.rng.randi_range` among live
+   marbles (ENGAGE or RETREAT), one random attacker `a` of side `s` per
+   target; apply `hp[t] -= chunk` (chunk = D / max(1, ceil(D / 8)) so
+   several marbles take damage per step), `xp[a] += chunk * LOD_XP_PER_DMG`
+   (accumulate in a float side array and floor into xp), push `[HIT, a, t]`.
+   Death: `state = DEAD`, `hp = 0`, `kills[a] += 1`, `xp[a] += XP_PER_KILL`,
+   `faction_alive[side] -= 1`, `[KILL, a, t]`, morale hits to that side
+   (ally −0.02; captain −0.4 + `faction_captain = -1` + `[CAPTAIN_DEAD, a, t]`),
+   rank-up check on `a` exactly as `Weapons` does it.
+3. Spin decay, morale/hp retreat triggers as `BattleSim` step 10; a RETREAT
+   marble accumulates `hit_cd` as a flee timer (reuse the field): after
+   `LOD_FLEE_TIME` seconds → `fled = 1, state = DEAD, faction_alive -= 1, [FLED, i, -1]`.
+4. `s.tick += 1; s.time += dt`; `s.events` is cleared at the start of the step.
+
+`WorldSim.step_battles` steps each battle with `BattleSim.step` when
+`inst.id == w.watched_battle` (new `World` field, -1 none; set by the
+scene when the battle view opens) and with `BattleLod.step` otherwise.
+`winner()` and `finish()` are unchanged.
+
+### 14.3 SaveGame (`scripts/world/save_game.gd`, `class_name SaveGame`)
+
+`static func save(w: World, path: String) -> Error` writes one file:
+header Dictionary `{version, seed_state, time, faction_count, next_battle_id,
+cols, rows, borders_version}` via `store_var`, then every packed array of
+`WorldMap`, `Units`, `Stacks` (including `path` as an Array of
+PackedVector2Array), the town arrays, plinko profile, `ktraits`,
+`relations`, `faction_alive/color/names`, `dynasty`, `names`, `events_log`,
+`plinko_log` (last 10 only), `scars` — each as `store_var` of a Dictionary
+`{field: value}` per object (packed arrays serialise natively; no per-unit
+dictionaries). Live battles are **not** saved: before writing, every
+stack in BATTLE is set IDLE with `immunity = RETREAT_IMMUNITY` on a
+**copy** of the state? — no copies: `save` first calls
+`BattleBridge.finish` on nothing; instead it records battles as absent and
+the loader restores those stacks as IDLE with immunity. `w.rng.state` is
+saved so the sequence continues.
+
+`static func load(path: String) -> World` rebuilds `World` from the file,
+recreates `Pathing`, calls `sync_town_arrays` and `recompute_borders`.
+Round-trip test: `create(42)` → 300 steps → save → load → `stacks.x`,
+`units.xp`, `map.kind`, `town_owner`, `ktraits`, `relations`, `events_log`
+equal; then 300 more steps on both (original and loaded) yield equal
+`stacks.x` (determinism across save/load).
+
+### 14.4 Scene additions
+
+- Time controls (`CanvasLayer` `HBoxContainer` bottom-centre): buttons
+  `⏸ 1x 5x 50x MAX`; keys `space, 1, 2, 3, 4`. MAX runs steps until
+  `MAX_FRAME_MS` elapsed in that frame.
+- `SpectatePanel` (`scripts/render/spectate_panel.gd`): left-click on a
+  stack (world view) → panel at bottom-right: stack label, faction name,
+  captain name + dynasty numeral + trait name, top 5 units by kills with
+  names when present, goal name; in the battle view a left-click on a
+  marble (nearest within 12 px) shows that unit. `Esc` closes.
+- `TimelinePanel`: top-left under the HUD, last `TIMELINE_LINES` lines of
+  `events_log`, newest at the bottom, refreshed when the log length changes.
+- `LedgerPanel` anchored to the right edge with `anchor_right = 1,
+  offset_left = -270` so it never clips; faction rows show `faction_names`.
+- Save/load: `F5` saves `user://save1.bin`, `F9` loads it (scene rebuilds
+  layers from the new `World`).
+- `w.watched_battle` set on battle view open, -1 on close.

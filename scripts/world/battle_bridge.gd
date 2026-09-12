@@ -123,6 +123,15 @@ static func join(inst: BattleInstance, world: World, stack: int) -> bool:
 			e = ei
 			break
 
+	# Allies (§13.5): a joining stack whose world faction isn't yet mapped
+	# reuses an already-mapped local index if it's allied with the faction
+	# holding that index, instead of taking a new edge.
+	if e == -1:
+		for ei_a in range(4):
+			if inst.faction_map[ei_a] != -1 and world.allied(inst.faction_map[ei_a], wf):
+				e = ei_a
+				break
+
 	var is_new_faction := e == -1
 	if is_new_faction:
 		var taken := PackedInt32Array()
@@ -142,6 +151,9 @@ static func join(inst: BattleInstance, world: World, stack: int) -> bool:
 	if is_new_faction:
 		inst.faction_map[e] = wf
 		inst.edge_of_faction[e] = e
+
+	if not inst.side_factions[e].has(wf):
+		inst.side_factions[e].append(wf)
 
 	var prev_captain := state.faction_captain[e]
 
@@ -172,30 +184,171 @@ static func join(inst: BattleInstance, world: World, stack: int) -> bool:
 	return true
 
 
+## Local faction index `e` holding world faction `wf`: any local index whose
+## side_factions contains `wf` (primary or allied joiners alike, §13.5).
+static func _side_of(inst: BattleInstance, wf: int) -> int:
+	for e in range(inst.side_factions.size()):
+		var arr: PackedInt32Array = inst.side_factions[e]
+		if arr.has(wf):
+			return e
+	return -1
+
+
+## Nearest RUIN tile to (x, y) by world distance; (-1, -1) when none exists.
+static func _nearest_ruin_tile(world: World, x: float, y: float) -> Vector2i:
+	var best := Vector2i(-1, -1)
+	var best_d := INF
+	for ty in range(world.map.rows):
+		for tx in range(world.map.cols):
+			if world.map.kind[world.map.idx(tx, ty)] != WorldMap.Kind.RUIN:
+				continue
+			var d: float = Vector2(x, y).distance_to(world.map.center_of(tx, ty))
+			if d < best_d:
+				best_d = d
+				best = Vector2i(tx, ty)
+	return best
+
+
+## Safe read of faction name by index, guarded against out-of-bounds.
+static func _fname(world: World, f: int) -> String:
+	if f < world.faction_names.size():
+		return world.faction_names[f]
+	else:
+		return "Faction %d" % f
+
+
+## Rebirth / mercenaries (docs/ARCHITECTURE.md §13.4 last bullet). Runs after
+## the winner/loser pass in `finish`. A losing stack whose only remaining
+## attached members are this battle's fled survivors (stacks.count ==
+## fled_survivors.size()), with no other alive stack of the same world
+## faction and no towns owned by that faction, is "the last stack destroyed":
+## its survivors are re-homed instead of marching home with an empty shell.
+## UNDECIDED: only runs when the battle had a winner (winner_world != -1,
+## needed for the mercenary branch's "join the winner stack"); §13.4 doesn't
+## say what a stalemate should do here, so that case is left as ordinary
+## (attached, un-retired) survivors.
+static func _process_rebirth(world: World, inst: BattleInstance, winner_world: int, winner_stack: int, fled_survivors: Dictionary) -> void:
+	if winner_world == -1:
+		return
+	var stacks := world.stacks
+	var units := world.units
+
+	for stack in inst.stack_ids:
+		if stacks.faction[stack] == winner_world:
+			continue
+		var fled_list: Array = fled_survivors.get(stack, [])
+		if fled_list.is_empty():
+			continue
+		if stacks.count[stack] != fled_list.size():
+			continue
+
+		var wf: int = stacks.faction[stack]
+
+		var other_alive := false
+		for k in range(stacks.n):
+			if k != stack and stacks.alive[k] == 1 and stacks.faction[k] == wf:
+				other_alive = true
+				break
+		if other_alive:
+			continue
+
+		var has_town := false
+		for ti in range(world.towns.size()):
+			if world.town_owner[ti] == wf:
+				has_town = true
+				break
+		if has_town:
+			continue
+
+		var founder := -1
+		var founder_rank := -1
+		for u in fled_list:
+			if units.rank[u] > founder_rank:
+				founder_rank = units.rank[u]
+				founder = u
+
+		var ruin := Vector2i(-1, -1)
+		if founder_rank >= Tuning.LEGEND_RANK:
+			ruin = _nearest_ruin_tile(world, stacks.x[stack], stacks.y[stack])
+
+		if founder_rank >= Tuning.LEGEND_RANK and ruin != Vector2i(-1, -1):
+			var g := Kingdoms.new_faction(world, wf)
+			var center := world.map.center_of(ruin.x, ruin.y)
+			var new_stack := stacks.add(g, center.x, center.y, NameGen.stack_name(world.rng))
+			for u2 in fled_list:
+				units.faction[u2] = g
+				units.stack[u2] = new_stack
+			if units.is_captain[founder] == 0:
+				Lineage.make_captain(world, founder, NameGen.captain_name_base(world.rng))
+			stacks.captain_unit[new_stack] = founder
+			var founder_name: String = units.names.get(founder, "Unit %d" % founder)
+			world.log_event("%s founds %s" % [founder_name, _fname(world, g)])
+		else:
+			for u2 in fled_list:
+				units.faction[u2] = winner_world
+				units.stack[u2] = winner_stack
+			world.log_event("%s's survivors join %s as mercenaries" % [stacks.names[stack], _fname(world, winner_world)])
+
+		stacks.recount(units)
+		if stacks.count[stack] == 0:
+			stacks.alive[stack] = 0
+
+
 static func finish(inst: BattleInstance, world: World) -> Dictionary:
 	var state := inst.state
 	var units := world.units
 	var stacks := world.stacks
 
+	# fiat (m5-lineage): remember each stack's captain unit id before the
+	# copy-back, so Lineage.on_battle_finished can detect a captain's death
+	# after Units.kill has already run below.
+	var captain_before := PackedInt32Array()
+	for stack_id in inst.stack_ids:
+		captain_before.append(stacks.captain_unit[stack_id])
+	inst.captain_before = captain_before
+
 	var dead_count := 0
+	var stack_survivors := {}     # stack id -> surviving-marble count (this battle)
+	var fled_survivors := {}      # stack id -> Array[unit id] that fled this battle
 	for i in range(state.n):
 		var u: int = inst.unit_of[i]
 		units.xp[u] = state.xp[i]
 		units.kills[u] = state.kills[i]
 		units.rank[u] = state.rank[i]
+		Lineage.check_legend(world, u)
 		var truly_dead: bool = state.state[i] == BattleState.State.DEAD and state.fled[i] == 0
+		var home_stack: int = units.stack[u]
 		if truly_dead:
 			dead_count += 1
 			units.kill(u)
 		else:
 			units.hp_frac[u] = state.hp[i] / state.hp_max[i]
+			stack_survivors[home_stack] = stack_survivors.get(home_stack, 0) + 1
+			if state.fled[i] == 1:
+				if not fled_survivors.has(home_stack):
+					fled_survivors[home_stack] = []
+				fled_survivors[home_stack].append(u)
 
 	stacks.recount(units)
 
 	var local_winner: int = inst.sim.winner(state)
-	var winner_world: int = -1
-	if local_winner >= 0:
-		winner_world = inst.faction_map[local_winner]
+	var winner_side: int = local_winner if local_winner >= 0 else -1
+
+	# world faction of the winning-side stack with the most survivors (§13.5).
+	var winner_world := -1
+	var winner_stack := -1
+	if winner_side != -1:
+		var best_surv := -1
+		for stack in inst.stack_ids:
+			var wf_c: int = stacks.faction[stack]
+			if _side_of(inst, wf_c) != winner_side:
+				continue
+			var surv: int = stack_survivors.get(stack, 0)
+			if surv > best_surv:
+				best_surv = surv
+				winner_stack = stack
+		if winner_stack != -1:
+			winner_world = stacks.faction[winner_stack]
 
 	# UNDECIDED: the fiat event format "%s beat %s at (%d,%d)" doesn't say
 	# which stack's name fills each %s when a side has several stacks (or
@@ -205,15 +358,15 @@ static func finish(inst: BattleInstance, world: World) -> Dictionary:
 	var winner_name := ""
 	var loser_name := ""
 
+	if winner_world != -1:
+		Kingdoms.on_event(world, "win", winner_world)
+	var retreated_factions := {}
+
 	for stack in inst.stack_ids:
 		var wf: int = stacks.faction[stack]
-		var e := -1
-		for ei in range(4):
-			if inst.faction_map[ei] == wf:
-				e = ei
-				break
+		var e := _side_of(inst, wf)
 
-		var is_winner: bool = local_winner >= 0 and e == local_winner
+		var is_winner: bool = winner_side != -1 and e == winner_side
 		if is_winner:
 			if winner_name == "":
 				winner_name = stacks.names[stack]
@@ -222,6 +375,9 @@ static func finish(inst: BattleInstance, world: World) -> Dictionary:
 		else:
 			if loser_name == "":
 				loser_name = stacks.names[stack]
+			if not retreated_factions.has(wf):
+				retreated_factions[wf] = true
+				Kingdoms.on_event(world, "retreat", wf)
 			stacks.state[stack] = Stacks.State.RETREATING
 			stacks.immunity[stack] = Tuning.RETREAT_IMMUNITY
 			var town_id := world.nearest_town(stacks.x[stack], stacks.y[stack], wf, 0)
@@ -245,11 +401,21 @@ static func finish(inst: BattleInstance, world: World) -> Dictionary:
 		if world.events_log.size() > 200:
 			world.events_log.pop_front()
 
+	# Runs after the "beat" line above so a rebirth/mercenary line (if any)
+	# is the newest events_log entry.
+	_process_rebirth(world, inst, winner_world, winner_stack, fled_survivors)
+
 	world.battles.erase(inst)
 
-	return {
+	var result := {
 		"winner": winner_world,
+		"winner_side": winner_side,
 		"tile": inst.tile,
 		"dead": dead_count,
 		"duration": world.time - inst.started
 	}
+
+	Lineage.on_battle_finished(world, inst, result)
+	Kingdoms.on_battle_finished(world, inst, result)
+
+	return result

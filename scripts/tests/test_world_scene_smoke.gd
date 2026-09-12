@@ -15,6 +15,8 @@ func _init() -> void:
 		"res://scripts/render/battle_view.gd",
 		"res://scripts/render/ledger_panel.gd",
 		"res://scripts/render/plinko_view.gd",
+		"res://scripts/render/spectate_panel.gd",
+		"res://scripts/render/timeline_panel.gd",
 	]
 	for p in paths:
 		var script: GDScript = load(p)
