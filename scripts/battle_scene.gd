@@ -15,11 +15,19 @@ var _prev_owner: PackedInt32Array
 
 
 func _ready() -> void:
+	var per_side: int = 500
+
+	# Parse --per-side arg
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--per-side="):
+			per_side = int(arg.substr(11))
+			per_side = clampi(per_side, 1, 500)
+
 	state = BattleState.new(1100, 1)
 	state.spawn(350, 450, 0, 1, 1, true)
 	state.spawn(1250, 450, 1, 1, 1, true)
-	state.spawn_block(0, 500, Rect2(100, 100, 500, 700), -1)
-	state.spawn_block(1, 500, Rect2(1000, 100, 500, 700), -1)
+	state.spawn_block(0, per_side, Rect2(100, 100, 500, 700), -1)
+	state.spawn_block(1, per_side, Rect2(1000, 100, 500, 700), -1)
 
 	terrain = TerrainGrid.new()
 	terrain.setup(state.arena, Tuning.TERRAIN_CELL)
@@ -75,6 +83,8 @@ func _process(_delta: float) -> void:
 	sim.step(state, Tuning.DT)
 	sim_ms = (Time.get_ticks_usec() - t0) / 1000.0
 	ticks += 1
+
+	renderer.ingest(state)
 
 	for event in state.events:
 		var etype: int = event[0]

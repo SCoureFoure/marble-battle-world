@@ -1082,3 +1082,308 @@ equal; then 300 more steps on both (original and loaded) yield equal
 - Save/load: `F5` saves `user://save1.bin`, `F9` loads it (scene rebuilds
   layers from the new `World`).
 - `w.watched_battle` set on battle view open, -1 on close.
+
+## 15. M7 — bounce, RPM economy, damage variance, spin legibility
+
+Goal (Leader, 2026-09-12): battles must *look* like spinning tops bouncing
+off obstacles, enemies and allies. RPM is the resource: hits and clashes
+drain it, ally bounces and good terrain raise it, swamps drain it, and RPM
+scales damage. The viewer has no input, so every effect must be legible
+with little clutter. Root cause of the old "grinding blob": `FRICTION`
+0.92 applied **per tick** kept 0.7% of speed per second, so every bounce
+died within ~0.2 s.
+
+Rule for every slice: §15 **extends** §10; anything §15 does not mention
+stays as §10 says. Old constants (`SPIN_TRANSFER`, `SPIN_HIT_COST`,
+`FUMBLE_*`, `CRIT_CHANCE`, `FRICTION_MUD/COBBLE/ICE/WATER`) stay defined
+until a cleanup slice removes them; new code must not read them.
+`SPIN_DECAY` stays (BattleLod uses it). `CRIT_MULT` stays and is reused.
+
+### 15.1 Tuning additions (fiat, all tunable in the feel pass)
+
+```
+# velocity fraction kept after 1 s, index = TerrainGrid.Kind (10 = FLOWERS)
+DRAG_KEEP_PER_S = [0.12, 0.02, 0.20, 0.60, 0.01, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12]  # M8 pace
+# RPM per second by Kind: grass/good ground spins up, swamp (MUD, WATER) drains, FLOWERS is a speed zone
+SPIN_RATE = [3.0, -15.0, 3.0, 3.0, -20.0, 0.0, 0.0, 3.0, 3.0, 3.0, 12.0]
+HAZARD_DPS = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 8.0, 15.0, 0.0]   # replaces the M2 value: +FLOWERS entry
+WEAPON_DMG_MULT = 1.5            # weapons pack the bigger punch
+WEAPON_CRIT_CHANCE = [0.15, 0.0, 0.0, 0.0, 0.0]   # by weapon_id; dagger only; crit = x CRIT_MULT
+DMG_SIGMA = 0.20                 # damage multiplier ~ normal(1.0, DMG_SIGMA)
+DMG_MULT_MIN = 0.4
+DMG_MULT_MAX = 1.6
+HIT_SPIN_COST_ATTACKER = 6.0     # RPM lost by the attacker per weapon hit
+HIT_SPIN_COST_DEFENDER = 10.0    # RPM lost by the victim per weapon hit
+RECOIL_FRAC = 0.5                # attacker velocity kick = -dir * kb * this
+BODY_DMG = 3.0                   # body clash base damage (smaller than any weapon x WEAPON_DMG_MULT)
+CLASH_MIN_VREL = 20.0            # approach speed (u/s) needed for an enemy clash
+CLASH_KICK = 110.0               # extra separating speed at average spin == SPIN_REF  # M8 pace
+CLASH_SPIN_COST = 4.0            # RPM lost by a marble when it deals body clash damage
+BUMP_COOLDOWN = 0.35             # s between body-clash damage dealt by one marble
+ALLY_MIN_VREL = 80.0             # approach speed needed for an ally spin boost (r2: was 30 -> 3000 boosts/s flood)
+BOOST_COOLDOWN = 1.5             # s before a marble can receive another ally boost
+ALLY_SPIN_GAIN = 0.05            # RPM gained per u/s of approach speed, each ally
+ALLY_SPIN_GAIN_MAX = 8.0         # per bounce cap
+```
+
+### 15.2 BattleState additions
+
+```gdscript
+var bump_cd: PackedFloat32Array   # per marble, allocated to cap, spawn sets 0.0
+var boost_cd: PackedFloat32Array  # per marble, allocated to cap, spawn sets 0.0
+enum Event { HIT = 0, KILL = 1, LEVEL = 2, CAPTAIN_DEAD = 3, FLED = 4, BUMP = 5, BOOST = 6 }
+```
+
+Event shapes: `HIT` becomes `[HIT, attacker, victim, dmg]` (4 elements;
+BattleLod still pushes 3 — consumers read `ev[3]` only when
+`ev.size() > 3`). `BUMP = [BUMP, dealer, victim, dmg]`.
+`BOOST = [BOOST, i, j, gain]` (both allies gained `gain`). KILL / LEVEL /
+CAPTAIN_DEAD / FLED unchanged.
+
+### 15.3 Damage (`scripts/sim/damage.gd`, `class_name Damage`, new)
+
+```gdscript
+static var force_mult: float = -1.0
+static func roll(s: BattleState, crit_chance: float) -> float
+    # force_mult >= 0.0 -> return force_mult (no rng draws at all).
+    # m = clampf(s.rng.randfn(1.0, Tuning.DMG_SIGMA), DMG_MULT_MIN, DMG_MULT_MAX)
+    # if crit_chance > 0.0 and s.rng.randf() < crit_chance: m *= Tuning.CRIT_MULT
+    # (randf is drawn only when crit_chance > 0.0)
+static func apply(s: BattleState, attacker: int, victim: int, dmg: float, event_type: int) -> void
+    # hp[victim] -= dmg; xp[attacker] += XP_PER_HIT; push [event_type, attacker, victim, dmg]
+    # then the §10.4 step 8 kill block (DEAD, hp 0, kills, XP_PER_KILL, faction_alive,
+    # KILL event, morale hits, captain -> CAPTAIN_DEAD) and the §10.4 step 9 rank-up
+    # loop on attacker, verbatim in behaviour and event order.
+```
+
+### 15.4 Weapons changes (replaces §10.4 steps 4-9)
+
+After a candidate `j` is found:
+4. `m = Damage.roll(s, WEAPON_CRIT_CHANCE[w])`. No fumble branch exists any more.
+5. `dmg = WEAPON_DMG[w] * WEAPON_DMG_MULT * (spin[i] / SPIN_REF) * RANK_MULT[rank[i]] * m`; shield ×`SHIELD_DMG_MULT` exactly as before.
+6. Knockback on `j` exactly as §10.4 step 6 (uses spins **before** step 7).
+   Recoil: `v_i -= normalize(p_j - p_i) * kb * RECOIL_FRAC` (skipped when the distance is 0, like the knockback).
+7. `spin[i] = max(RPM_MIN, spin[i] - HIT_SPIN_COST_ATTACKER)`;
+   `spin[j] = max(RPM_MIN, spin[j] - HIT_SPIN_COST_DEFENDER)`.
+8. `hit_cd[i] = WEAPON_COOLDOWN[w]`; `Damage.apply(s, i, j, dmg, Event.HIT)`.
+
+`Weapons.force_roll` is deleted; tests use `Damage.force_mult`.
+
+### 15.5 Collision changes (replaces the spin block of §7-step collision)
+
+Per pair `i, j`: first, `if state[i] == DEAD or state[j] == DEAD: continue`
+(a clash may kill mid-loop). Position correction unchanged. Compute
+`vrel = (v_j - v_i) · n` **before** the restitution impulse; the
+restitution impulse is unchanged. Then:
+
+- **Enemy clash** (`faction_id` differ, `vrel < -CLASH_MIN_VREL`):
+  `dv = CLASH_KICK * (spin[i] + spin[j]) / (2 * SPIN_REF)`;
+  `v_i -= n * dv * wi / wsum`; `v_j += n * dv * wj / wsum`.
+  Then for `(a, b)` in order `(i, j)`, `(j, i)`: if `state[a] == ENGAGE`,
+  `bump_cd[a] == 0.0` and `state[b] != DEAD`:
+  `dmg = BODY_DMG * (spin[a] / SPIN_REF) * RANK_MULT[rank[a]] * Damage.roll(s, 0.0)`;
+  `spin[a] = max(RPM_MIN, spin[a] - CLASH_SPIN_COST)`; `bump_cd[a] = BUMP_COOLDOWN`;
+  `Damage.apply(s, a, b, dmg, Event.BUMP)`.
+- **Ally bounce** (same `faction_id`, `vrel < -ALLY_MIN_VREL`, and
+  `boost_cd[i] == 0.0` **and** `boost_cd[j] == 0.0`):
+  `gain = min(ALLY_SPIN_GAIN_MAX, ALLY_SPIN_GAIN * -vrel)`; both
+  `spin = min(spin_cap, spin + gain)`; both `boost_cd = BOOST_COOLDOWN`;
+  push `[BOOST, i, j, gain]`.
+- Old spin transfer ("faster steals") and per-`dt` enemy contact cost are removed.
+
+### 15.6 BattleSim changes
+
+- Integrate, no terrain: friction = `pow(DRAG_KEEP_PER_S[0], dt)` (computed once per step). With terrain: `terrain.friction[c]` as before (TerrainGrid now fills it from drag, §15.7).
+- Step 9 replaced, per live marble: `k = terrain.kind[terrain.cell_at(px, py)]` if terrain else `TerrainGrid.Kind.PLAIN`;
+  `spin = clampf(spin + SPIN_RATE[k] * dt, RPM_MIN, spin_cap)`; `bump_cd = maxf(0.0, bump_cd - dt)`; `boost_cd = maxf(0.0, boost_cd - dt)`.
+  Tower regen in step 6 unchanged.
+
+### 15.7 TerrainGrid / TerrainGen / TerrainLayer
+
+- `enum Kind { ..., SPIKE = 9, FLOWERS = 10 }`. Not solid.
+- `friction_of(k) = pow(Tuning.DRAG_KEEP_PER_S[k], Tuning.DT)` for every kind.
+- `TerrainGen.from_tile` / `demo` add FLOWERS patches (square, only over PLAIN cells, never inside the given spawn rects, all draws from `rng`):
+  PLAINS 2×3x3, FOREST 1×3x3, HILLS 1×4x4, RIVER 2×3x3, TOWN 2×2x2, demo 1×3x3; RUIN, GRAVEYARD none.
+- `TerrainLayer`: FLOWERS = rect `Color(0.62, 0.78, 0.42)` plus three pink dots `Color(0.95, 0.60, 0.80)`, radius 3, at cell offsets (0.25,0.3), (0.7,0.45), (0.4,0.75) × cell.
+
+### 15.8 Renderer — spin glow and sparks
+
+Bodies MultiMesh: `use_colors = true`; per instance **16 floats**
+`[sx,0,0,tx, 0,sy,0,ty, g,0,0,1, cr,cg,cb,ca]`, `g = clampf(spin / spin_cap, 0, 1)`
+(0 when DEAD or `spin_cap <= 0`); custom unchanged. Body shader: vertex
+passes `COLOR.r` as `glow` and does not tint by it; fragment:
+`dull = clamp((0.35 - glow) / 0.35, 0, 1)`; fill = `mix(fill, vec3(luma(fill) * 0.7), 0.6 * dull)`;
+rim (`d > 0.8`) = `mix(fill, vec3(1), 0.1 + 0.6 * glow)` (replaces the fixed
+rim lighten); rank ring and captain dot unchanged. Weapons/HpBars layouts unchanged.
+
+Sparks: fourth `MultiMeshInstance2D` `Sparks` (added after HpBars), quad
+2x2, `use_custom_data`, shader `shaders/spark.gdshader`, fixed
+`instance_count = SPARK_POOL`. Render-only state on `BattleRenderer`
+(consts on the class, not `Tuning`):
+
+```gdscript
+const SPARK_POOL := 256
+var spark_x, spark_y, spark_r, spark_age, spark_life: PackedFloat32Array   # size SPARK_POOL; life 0 = inactive
+var spark_kind: PackedInt32Array      # 0 hit, 1 bump, 2 boost
+var spark_head: int = 0               # ring-buffer write index (oldest overwritten)
+var _last_tick: int = -1
+func ingest(s: BattleState) -> void
+    # return if s.tick == _last_tick (paused views must not respawn sparks); _last_tick = s.tick.
+    # for ev in s.events with ev[0] in {HIT, BUMP, BOOST} and ev[1] >= 0 and ev[2] >= 0:
+    #   pos = midpoint of marbles ev[1], ev[2]; dmg = ev[3] if ev.size() > 3 else 8.0
+    #   HIT:   r = clampf(6 + 1.2 * dmg, 6, 28), life 0.25, kind 0
+    #   BUMP:  r = clampf(4 + 1.0 * dmg, 4, 14), life 0.25, kind 1
+    #   BOOST: r = 6, life 0.18, kind 2
+    #   write at spark_head (age 0), spark_head = (spark_head + 1) % SPARK_POOL
+func advance(dt: float) -> void       # age += dt on active; age >= life -> life = 0
+func build_spark_buffer() -> PackedFloat32Array
+    # SPARK_POOL * 12 floats. Active: grow = 0.4 + 0.6 * age / life; sx = sy = r * grow; (tx, ty) = pos;
+    # custom = (kind / 2.0, 1 - age / life, 0, 0). Inactive: all 12 floats 0.
+```
+
+`_process(dt)`: `advance(dt)` then `refresh()`; `refresh` also uploads the
+spark buffer. Spark shader: `d = length(UV - 0.5) * 2`, discard `d > 1`;
+kind 0 = warm ring `(1.0, 0.45, 0.05)` band `0.6..1.0`, 1.0 × fade; kind 1 =
+dark grey ring `(0.2, 0.2, 0.2)` band `0.8..1.0`, 0.7 × fade; kind 2 = soft cyan disc `(0.2, 0.85, 1.0)`, 0.9 × fade;
+alpha × `custom.g`. Callers: `BattleView._process` and `battle_scene.gd`
+call `renderer.ingest(state)` once per frame before reading events. No
+damage numbers.
+
+### 15.9 Feel bench (`scripts/bench_bounce.gd`)
+
+Headless `extends SceneTree`. Seeds 1..5: `BattleState.new(400, seed)`;
+`TerrainGrid.setup(arena, TERRAIN_CELL)` + `TerrainGen.demo(g, s.rng)`;
+`spawn_block(0, 150, Rect2(100,100,500,700), -1)`,
+`spawn_block(1, 150, Rect2(1000,100,500,700), -1)`; `BattleSim.new(s)`,
+`set_terrain(g)`; step `Tuning.DT` until `winner != -1` or
+`T_MAX_BATTLE / DT` ticks. Every 30 ticks sample over live ENGAGE marbles:
+mean speed, mean spin, `contact_frac` = share of live marbles with a live
+enemy centre within `r_i + r_j + 1.0`. Count events by int type 0, 5, 6.
+Prints per seed
+`SEED=%d winner=%d duration=%.1f mean_speed=%.1f contact_frac=%.3f hits_per_s=%.1f bumps_per_s=%.1f boosts_per_s=%.1f mean_spin=%.1f`
+then `SUMMARY` with the same keys averaged. Uses only APIs that exist at M6
+(so it runs on the old code for a baseline).
+
+## 16. M8 — battle instincts, pace, visible weapons
+
+Leader (2026-09-13): keep M7. Marbles should want to attack but not shoot
+across the field like bullets; prefer 1:1 targets and double up when it
+makes sense; battles more chaotic, not two blobs smashing into one ball.
+Weapons must be visible, and their hitboxes readable. §16 layers a
+decision layer on §6/§10.6 forces; anything unmentioned stays as is.
+
+### 16.1 Tuning (fiat, tunable)
+
+```
+SEPARATION_RANGE_MULT = 2.0      # changed from 1.2: allies keep ~1 marble-width gap
+CRUISE_SPEED = 50.0              # self-propelled speed cap while not near the target  # M8 pace
+CHARGE_SPEED = 160.0             # cap while within strike range of the target, or recoiling  # M8 pace
+RETREAT_SPEED = 80.0             # cap while RETREAT  # M8 pace
+STRIKE_RANGE_MULT = 6.0          # near target when centre distance < this * r_i
+RECOIL_TIME = 0.45               # s of back-off after dealing a HIT or BUMP
+K_RECOIL = 25.0                  # back-off acceleration (same units as K_ATTR)
+OUTMATCH_RATIO = 1.25            # target power > this * own power -> want 2 attackers
+CROWD_PENALTY = 8.0              # score cost (radius units) per attacker beyond wanted
+FINISH_HP_FRAC = 0.35            # target below this hp fraction is a finish-off target
+FINISH_BONUS = 4.0               # score reduction for finish-off targets
+STICKY_BONUS = 2.0               # score reduction for keeping the current target
+SPREAD_KEEP = 1.0                # advance keeps this share of lateral offset (line, not wedge)
+```
+
+Power of marble k: `power(k) = hp[k] * (spin[k] / SPIN_REF + 0.25) * RANK_MULT[rank[k]]`.
+
+### 16.2 BattleState additions
+
+```gdscript
+var attackers: PackedInt32Array   # per marble: ENGAGE marbles whose target_id is this marble; rebuilt by Forces.retarget
+var recoil_t: PackedFloat32Array  # per marble: seconds of back-off left; spawn 0.0
+```
+
+Both allocated to capacity like `hit_cd`.
+
+### 16.3 Forces changes
+
+**retarget(s, coarse, tick)** — at the very start, every tick: `attackers.fill(0)`;
+for every live marble `i` with `state == ENGAGE`, `target_id[i] >= 0` and that
+target not DEAD: `attackers[target_id[i]] += 1`. Then the staggered loop
+as today, except for ENGAGE marbles on their retarget tick:
+
+```
+for each candidate enemy j (live, other faction, dist <= ENGAGE_RADIUS_MULT * r_i):
+    att   = attackers[j] - (1 if target_id[i] == j else 0)
+    want  = 2 if power(j) > OUTMATCH_RATIO * power(i) else 1
+    if is_captain[j] == 1: want += 1
+    score = dist / r_i + CROWD_PENALTY * max(0, att + 1 - want)
+    if hp[j] < FINISH_HP_FRAC * hp_max[j]: score -= FINISH_BONUS
+    if j == target_id[i]: score -= STICKY_BONUS
+pick minimum score; ties -> lower j; none -> -1
+```
+
+When the pick differs from the old target, update counts immediately
+(`attackers[old] -= 1` if old was a live counted target, `attackers[new] += 1`)
+so later marbles in the same tick see it. RETREAT marbles keep the old
+nearest-enemy rule and are never counted.
+
+**accumulate(s, fine)** — per live marble, self-propelled terms are summed
+into a local drive `(dx, dy)` instead of straight into `ax/ay`:
+
+1. ENGAGE with a live target `t` (`d` = vector to t, `dist` = |d|):
+   - `recoil_t[i] > 0`: drive `-= K_RECOIL * d / dist` (back off; no attraction).
+   - else: drive `+= K_ATTR * aggression * morale * d / dist` (attraction as §6).
+2. ENGAGE with no target: advance with spread. `g` = nearest live enemy faction
+   by centroid (as §10.6), `cg`, `cf` = enemy / own centroid, `u = normalize(cg - cf)`,
+   `w = (-u.y, u.x)`, `lat = dot(p_i - cf, w)`, `aim = cg + w * lat * SPREAD_KEEP`;
+   drive `+= K_ADVANCE * normalize(aim - p_i)`. If `|cg - cf| < 1e-3`, fall back to
+   §10.6 (aim = cg). No enemy faction alive: no term.
+3. Cohesion (§6) only when `target_id[i] == -1`.
+4. RETREAT: attraction sign flip (§6) and home pull (§6) go into the drive.
+5. Cap: `cap = RETREAT_SPEED` if RETREAT; else `CHARGE_SPEED` if
+   (`recoil_t[i] > 0` or (target live and `dist < STRIKE_RANGE_MULT * r_i`)); else
+   `CRUISE_SPEED`. If `|drive| > 0`: `dir = drive / |drive|`,
+   `v_par = vx[i]*dir.x + vy[i]*dir.y`; if `v_par >= cap` the drive is dropped,
+   otherwise `ax += dx; ay += dy`.
+6. Separation (§6, now range 2.0) is unchanged and never capped.
+
+### 16.4 Damage / BattleSim
+
+- `Damage.apply`: when `event_type` is `Event.HIT` or `Event.BUMP` and
+  `attacker >= 0`: `recoil_t[attacker] = RECOIL_TIME` (set before the kill block).
+- `BattleSim` step 9: `recoil_t = maxf(0.0, recoil_t - dt)` beside bump_cd/boost_cd.
+
+### 16.5 Renderer — weapon silhouettes = hitboxes
+
+Weapon instance per live marble, rotation `weapon_angle`:
+`L = (WEAPON_REACH[w] + WEAPON_HIT_R[w]) * r` (centre to far edge of the hit
+circle), `H = WEAPON_HIT_R[w] * r` (half thickness = hit radius). Transform:
+x axis = `dir * L/2` (half length), y axis = `perp * H`, origin =
+`p + dir * L/2`. Custom: `(w / 4.0, flash, head_u, aspect)` with
+`head_u = WEAPON_REACH[w] / (WEAPON_REACH[w] + WEAPON_HIT_R[w])` (hit-circle
+centre along the quad, 0 = marble centre, 1 = far end) and
+`aspect = L / (2 * H)`. DEAD: all transform floats 0 except origin.
+
+`static func build_weapon_buffer(s, flash := PackedFloat32Array()) -> PackedFloat32Array`
+(12 floats per marble; `flash[i]` used when `i < flash.size()`, else 0).
+Renderer keeps `weapon_flash: PackedFloat32Array` sized `s.n` (grown in
+`attach`/`refresh`); `ingest` sets `weapon_flash[actor] = 0.15` for HIT
+events; `advance` decays it by dt to 0; `refresh` passes it.
+
+Weapon shader (`shaders/marble_weapon.gdshader`): UV.x along length (0 at the
+marble centre), UV.y across. With `aspect` correcting circles, the **head
+exactly fills the hit circle** (centre `head_u`, radius = the quad's half
+height), so the visible head IS the hitbox. Shaft from marble rim
+(`u = 1 / (REACH + HIT_R)` of length) to the head, thin dark
+`(0.15, 0.12, 0.10)`. Head silhouette per id, metal `(0.80, 0.82, 0.86)`
+with a dark outline, lerped to orange `(1.0, 0.55, 0.1)` by `flash`:
+dagger = short leaf blade, sword = long blade from rim to tip with a point,
+spear = diamond point on a thin pole, axe = crescent on one side,
+shield = thick arc across the head circle (no shaft). Distinct silhouettes
+are required; exact curves are the implementer's.
+
+### 16.6 Bench additions (`bench_bounce.gd`)
+
+Appended keys (same sampling, live ENGAGE marbles):
+`march_speed` = mean speed of ENGAGE marbles with `target_id == -1`;
+`crowd` = mean number of other live marbles within centre distance `3.0 * r_i`;
+`mean_attackers` = over live marbles targeted by >= 1 ENGAGE marble, mean count;
+`pile_frac` = share of those with more than 2 attackers (counts computed from
+`target_id`, not `attackers`). Uses only pre-M8 APIs.

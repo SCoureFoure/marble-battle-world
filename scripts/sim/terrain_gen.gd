@@ -40,6 +40,9 @@ static func demo(g: TerrainGrid, rng: RandomNumberGenerator) -> void:
 	# 7. tower at arena centre
 	g.set_cell(g.cols / 2, g.rows / 2, TerrainGrid.Kind.TOWER)
 
+	# 8. flowers
+	_flowers_patches(g, rng, 1, 3, PackedInt32Array([]))
+
 
 ## Per-kind arena dressing for a world-map tile. Source: docs/ARCHITECTURE.md §11.5
 ## and .warboss-horde/slices/m3-arena-from-tile.md. `edges` are the local-faction
@@ -51,6 +54,7 @@ static func from_tile(g: TerrainGrid, kind: int, edges: PackedInt32Array, rng: R
 		WorldMap.Kind.PLAINS:
 			_mud_blob(g, rng)
 			_rocks_trees(g, rng, 3, 1.0, edges)
+			_flowers_patches(g, rng, 2, 3, edges)
 		WorldMap.Kind.FOREST:
 			# UNDECIDED: §11.5 lists "20 trees, 1 mud" (trees first); placing the mud
 			# blob before the tree attempts here instead, so a mud/tree overlap reads
@@ -58,6 +62,7 @@ static func from_tile(g: TerrainGrid, kind: int, edges: PackedInt32Array, rng: R
 			# rather than silently eating already-placed trees.
 			_mud_blob(g, rng)
 			_rocks_trees(g, rng, 20, 0.0, edges)
+			_flowers_patches(g, rng, 1, 3, edges)
 		WorldMap.Kind.HILLS:
 			for cy in range(0, 8):
 				for cx in range(g.cols):
@@ -66,10 +71,12 @@ static func from_tile(g: TerrainGrid, kind: int, edges: PackedInt32Array, rng: R
 				for cx in range(g.cols):
 					g.set_slope(cx, cy, Vector2(0, -40))
 			_rocks_trees(g, rng, 6, 1.0, edges)
+			_flowers_patches(g, rng, 1, 4, edges)
 		WorldMap.Kind.RIVER:
 			g.fill_rect(19, 0, 20, g.rows - 1, TerrainGrid.Kind.WATER)
 			g.fill_rect(19, 10, 20, 12, TerrainGrid.Kind.COBBLE)
 			_rocks_trees(g, rng, 4, 1.0, edges)
+			_flowers_patches(g, rng, 2, 3, edges)
 		WorldMap.Kind.RUIN:
 			g.fill_rect(0, 11, g.cols - 1, 12, TerrainGrid.Kind.COBBLE)
 			_fire_patch(g, 17, 4, edges)
@@ -89,10 +96,42 @@ static func from_tile(g: TerrainGrid, kind: int, edges: PackedInt32Array, rng: R
 			g.fill_rect(19, 0, 20, g.rows - 1, TerrainGrid.Kind.COBBLE)
 			g.set_cell(20, 11, TerrainGrid.Kind.TOWER)
 			_rocks_trees(g, rng, 4, 0.0, edges)
+			_flowers_patches(g, rng, 2, 2, edges)
 		WorldMap.Kind.MOUNTAIN:
 			pass
 		_:
 			pass
+
+
+static func _patch_intersects_spawn_rect(patch_cx: int, patch_cy: int, patch_size: int, g: TerrainGrid, edges: PackedInt32Array) -> bool:
+	var patch_rect := Rect2(g.origin.x + patch_cx * g.cell, g.origin.y + patch_cy * g.cell, patch_size * g.cell, patch_size * g.cell)
+	for e in edges:
+		if patch_rect.intersects(BattleBridge.spawn_rect(e)):
+			return true
+	return false
+
+
+static func _flowers_patches(g: TerrainGrid, rng: RandomNumberGenerator, patch_count: int, patch_size: int, edges: PackedInt32Array) -> void:
+	for _patch_idx in patch_count:
+		for _retry in range(50):
+			var cx := rng.randi_range(0, g.cols - 1)
+			var cy := rng.randi_range(0, g.rows - 1)
+
+			# Check if patch intersects spawn rects
+			if _patch_intersects_spawn_rect(cx, cy, patch_size, g, edges):
+				continue
+
+			# Place the patch (only on PLAIN cells)
+			for dy in range(patch_size):
+				for dx in range(patch_size):
+					var gx := cx + dx
+					var gy := cy + dy
+					if gx < 0 or gx >= g.cols or gy < 0 or gy >= g.rows:
+						continue
+					if g.kind[gy * g.cols + gx] == TerrainGrid.Kind.PLAIN:
+						g.set_cell(gx, gy, TerrainGrid.Kind.FLOWERS)
+
+			break
 
 
 static func _in_any_spawn_rect(p: Vector2, edges: PackedInt32Array) -> bool:

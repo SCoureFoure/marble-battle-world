@@ -10,14 +10,16 @@ func _init() -> void:
 	var t := TestKit.new()
 	var dt := Tuning.DT
 
-	# 1. Free flight.
+	# 1. Free flight. M7: no-terrain friction is pow(DRAG_KEEP_PER_S[PLAIN], dt)
+	# (was flat FRICTION 0.92); spin now follows SPIN_RATE[PLAIN] (was SPIN_DECAY).
 	var s1 := one(100.0, 100.0, 0)
 	s1.vx[0] = 60.0
 	var sim1 := BattleSim.new(s1)
 	sim1.step(s1, dt)
-	t.check(t.approx(s1.vx[0], 55.2, 1e-3), "case1 vx[0] approx 55.2")
-	t.check(t.approx(s1.px[0], 100.92, 1e-3), "case1 px[0] approx 100.92")
-	t.check(t.approx(s1.spin[0], 99.93333, 1e-3), "case1 spin[0] approx 99.93333")
+	var fr1 := pow(Tuning.DRAG_KEEP_PER_S[TerrainGrid.Kind.PLAIN], dt)
+	t.check(t.approx(s1.vx[0], 60.0 * fr1, 1e-3), "case1 vx[0] approx 60*drag_keep")
+	t.check(t.approx(s1.px[0], 100.0 + 60.0 * fr1 * dt, 1e-3), "case1 px[0] approx new friction")
+	t.check(t.approx(s1.spin[0], 100.0 + Tuning.SPIN_RATE[TerrainGrid.Kind.PLAIN] * dt, 1e-3), "case1 spin[0] approx spin rate (plain)")
 	t.check(s1.tick == 1, "case1 tick == 1")
 	t.check(t.approx(s1.time, dt, 1e-6), "case1 time approx dt")
 
@@ -162,7 +164,9 @@ func _init() -> void:
 	var sim11 := BattleSim.new(s11)
 	sim11.set_terrain(g11)
 	sim11.step(s11, dt)
-	t.check(t.approx(s11.vx[m11], 48.0, 1e-2), "case11 vx[0] approx 48.0 (mud)")
+	# M7: friction_of(k) = pow(DRAG_KEEP_PER_S[k], DT) (was flat FRICTION_MUD 0.80).
+	var fr11 := pow(Tuning.DRAG_KEEP_PER_S[TerrainGrid.Kind.MUD], dt)
+	t.check(t.approx(s11.vx[m11], 60.0 * fr11, 1e-3), "case11 vx[0] approx mud drag (new rule)")
 
 	# 12. Slope pushes.
 	var s12 := BattleState.new(8, 3)
@@ -175,7 +179,9 @@ func _init() -> void:
 	var sim12 := BattleSim.new(s12)
 	sim12.set_terrain(g12)
 	sim12.step(s12, dt)
-	t.check(t.approx(s12.vy[m12], 100.0 * 12.0 * dt * 0.92, 1e-3), "case12 vy[0] approx 18.4")
+	# M7: terrain friction on PLAIN is pow(DRAG_KEEP_PER_S[PLAIN], DT) (was flat FRICTION 0.92).
+	var fr12 := pow(Tuning.DRAG_KEEP_PER_S[TerrainGrid.Kind.PLAIN], dt)
+	t.check(t.approx(s12.vy[m12], 100.0 * 12.0 * dt * fr12, 1e-3), "case12 vy[0] approx slope push (new friction)")
 	t.check(s12.py[m12] > 100.0, "case12 py[0] > 100.0")
 
 	# 13. Obstacle blocks.
@@ -228,7 +234,8 @@ func _init() -> void:
 	sim15.set_terrain(g15)
 	sim15.step(s15, dt)
 	t.check(g15.owner[10 * g15.cols + 10] == 0, "case15 owner[tower] == 0")
-	t.check(t.approx(s15.spin[a15], 50.0 + 10.0 * dt - 4.0 * dt, 1e-3), "case15 spin[0] approx 50.1")
+	# M7: step 9 adds SPIN_RATE[TOWER]*dt (was subtracting flat SPIN_DECAY*dt).
+	t.check(t.approx(s15.spin[a15], 50.0 + 10.0 * dt + Tuning.SPIN_RATE[TerrainGrid.Kind.TOWER] * dt, 1e-3), "case15 spin[0] approx tower regen + spin rate")
 	t.check(t.approx(s15.hp[a15], 50.0 + 5.0 * dt, 1e-3), "case15 hp[0] approx tower heal")
 
 	var b15 := s15.spawn(430.0, 420.0, 1, 0, 1, false)
@@ -245,7 +252,8 @@ func _init() -> void:
 	var b16 := s16.spawn(118.0, 100.0, 1, 0, 1, false)
 	s16.weapon_angle[a16] = 0.0
 	s16.weapon_angle[b16] = 0.0
-	Weapons.force_roll = 0.5
+	# M7: Weapons.force_roll is gone; Damage.force_mult = 1.0 is the "normal hit" reading.
+	Damage.force_mult = 1.0
 	var sim16 := BattleSim.new(s16)
 	sim16.step(s16, dt)
 	t.check(s16.hp[b16] < 100.0, "case16 hp[1] < 100.0")
@@ -254,7 +262,7 @@ func _init() -> void:
 		if ev16[0] == BattleState.Event.HIT and ev16[1] == a16:
 			found_hit16 = true
 	t.check(found_hit16, "case16 events contains HIT actor 0")
-	Weapons.force_roll = -1.0
+	Damage.force_mult = -1.0
 
 	# 17. Retreat on low hp.
 	var s17 := BattleState.new(8, 3)
@@ -355,6 +363,98 @@ func _init() -> void:
 		if not is_finite(s22.px[idx22]) or not is_finite(s22.py[idx22]):
 			finite22 = false
 	t.check(finite22, "case22 positions finite")
+
+	# 23. M7 required case 1: no terrain, lone marble, no enemies -> pure drag + spin rate.
+	var sA := one(800.0, 450.0, 0)
+	sA.vx[0] = 100.0
+	var simA := BattleSim.new(sA)
+	for _stepA in range(60):
+		simA.step(sA, dt)
+	t.check(t.approx(sA.spin[0], 103.0, 1e-3), "reqcase1 spin == 103.0 after 60 steps")
+	t.check(t.approx(sA.vx[0], 12.0, 2.0), "reqcase1 vx approx 12.0 (drag per second)")  # M8 pace
+	# 23b (required case 6): wrong-reading guard, old SPIN_DECAY rule would give 96.
+	t.check(sA.spin[0] > 100.0, "reqcase6 spin > 100 (guard vs old SPIN_DECAY reading)")
+
+	# 24. M7 required case 2: terrain MUD drains spin over 60 steps -> 85.0.
+	var sB := one(800.0, 450.0, 0)
+	var gB := TerrainGrid.new()
+	gB.setup(sB.arena, Tuning.TERRAIN_CELL)
+	gB.fill_rect(0, 0, gB.cols - 1, gB.rows - 1, TerrainGrid.Kind.MUD)
+	var simB := BattleSim.new(sB)
+	simB.set_terrain(gB)
+	for _stepB in range(60):
+		simB.step(sB, dt)
+	t.check(t.approx(sB.spin[0], 85.0, 1e-3), "reqcase2 spin MUD -> 85.0 after 60 steps")
+
+	# 25. M7 required case 3: terrain WATER, low starting spin floors at RPM_MIN.
+	var sC := one(800.0, 450.0, 0)
+	sC.spin[0] = 10.0
+	var gC := TerrainGrid.new()
+	gC.setup(sC.arena, Tuning.TERRAIN_CELL)
+	gC.fill_rect(0, 0, gC.cols - 1, gC.rows - 1, TerrainGrid.Kind.WATER)
+	var simC := BattleSim.new(sC)
+	simC.set_terrain(gC)
+	for _stepC in range(60):
+		simC.step(sC, dt)
+	t.check(t.approx(sC.spin[0], Tuning.RPM_MIN, 1e-6), "reqcase3 spin WATER floors at RPM_MIN")
+
+	# 26. M7 required case 4: terrain FLOWERS raises spin to the cap.
+	var sD := one(800.0, 450.0, 0)
+	var gD := TerrainGrid.new()
+	gD.setup(sD.arena, Tuning.TERRAIN_CELL)
+	gD.fill_rect(0, 0, gD.cols - 1, gD.rows - 1, TerrainGrid.Kind.FLOWERS)
+	var simD := BattleSim.new(sD)
+	simD.set_terrain(gD)
+	for _stepD in range(120):
+		simD.step(sD, dt)
+	t.check(t.approx(sD.spin[0], 120.0, 1e-3), "reqcase4 spin FLOWERS caps at 120.0")
+
+	# 27. M7 required case 5: bump_cd decrements per second and floors at 0.
+	var sE := one(800.0, 450.0, 0)
+	sE.bump_cd[0] = 0.35
+	var simE := BattleSim.new(sE)
+	var never_neg := true
+	for stepE in range(21):
+		simE.step(sE, dt)
+		if sE.bump_cd[0] < 0.0:
+			never_neg = false
+		if stepE == 9:
+			t.check(t.approx(sE.bump_cd[0], 0.35 - 10.0 * dt, 1e-4), "reqcase5 bump_cd after 10 steps")
+	t.check(t.approx(sE.bump_cd[0], 0.0, 1e-6), "reqcase5 bump_cd after 21 steps == 0")
+	t.check(never_neg, "reqcase5 bump_cd never negative")
+
+	# 28. boost_cd decrements per second and floors at 0.
+	var sF := one(800.0, 450.0, 0)
+	sF.boost_cd[0] = 1.5
+	var simF := BattleSim.new(sF)
+	var never_neg_boost := true
+	for stepF in range(30):
+		simF.step(sF, dt)
+		if sF.boost_cd[0] < 0.0:
+			never_neg_boost = false
+	t.check(t.approx(sF.boost_cd[0], 1.0, 1e-3), "case28 boost_cd approx 1.0 after 30 steps")
+	for _stepF2 in range(90):
+		simF.step(sF, dt)
+		if sF.boost_cd[0] < 0.0:
+			never_neg_boost = false
+	t.check(never_neg_boost, "case28 boost_cd never negative after 120 steps")
+
+	# 29. recoil_t decrements per second and floors at 0.
+	var sG := one(800.0, 450.0, 0)
+	sG.recoil_t[0] = 0.45
+	var simG := BattleSim.new(sG)
+	var never_neg_recoil := true
+	for stepG in range(12):
+		simG.step(sG, dt)
+		if sG.recoil_t[0] < 0.0:
+			never_neg_recoil = false
+	t.check(t.approx(sG.recoil_t[0], 0.45 - 12.0 * dt, 1e-4), "case29 recoil_t after 12 steps")
+	for _stepG2 in range(48):
+		simG.step(sG, dt)
+		if sG.recoil_t[0] < 0.0:
+			never_neg_recoil = false
+	t.check(t.approx(sG.recoil_t[0], 0.0, 1e-6), "case29 recoil_t == 0.0 after 60 steps")
+	t.check(never_neg_recoil, "case29 recoil_t never negative")
 
 	t.finish()
 	quit()

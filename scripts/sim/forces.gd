@@ -1,8 +1,16 @@
 class_name Forces
 extends RefCounted
 
-# Retarget: for each live marble on its staggered tick, pick the nearest
-# live enemy within engage range using the coarse spatial hash.
+# Power of marble k (§16.1): hp scaled by spin and rank, used to size wanted
+# attacker counts in the retarget score.
+static func power(s, k) -> float:
+	return s.hp[k] * (s.spin[k] / Tuning.SPIN_REF + 0.25) * Tuning.RANK_MULT[s.rank[k]]
+
+
+# Retarget: rebuild s.attackers from the current target assignments, then for
+# each live marble on its staggered tick either pick the nearest live enemy
+# (RETREAT: old rule, never counted) or the lowest-scored candidate (ENGAGE,
+# §16.3), updating attackers immediately so later marbles this tick see it.
 static func retarget(s: BattleState, coarse: SpatialHash, tick: int) -> void:
 	var px := s.px
 	var py := s.py
@@ -10,6 +18,14 @@ static func retarget(s: BattleState, coarse: SpatialHash, tick: int) -> void:
 	var faction_id := s.faction_id
 	var radius := s.radius
 	var target_id := s.target_id
+	var is_captain := s.is_captain
+	var hp := s.hp
+	var hp_max := s.hp_max
+
+	s.attackers.fill(0)
+	for i in range(s.n):
+		if state[i] == BattleState.State.ENGAGE and target_id[i] >= 0 and state[target_id[i]] != BattleState.State.DEAD:
+			s.attackers[target_id[i]] += 1
 
 	for i in range(s.n):
 		if state[i] == BattleState.State.DEAD:
@@ -24,8 +40,35 @@ static func retarget(s: BattleState, coarse: SpatialHash, tick: int) -> void:
 		var k := coarse.gather(px[i], py[i])
 		var scratch := coarse.scratch
 		var engage_radius := Tuning.ENGAGE_RADIUS_MULT * radius[i]
-		var best := -1
-		var best_dist := 0.0
+
+		if state[i] == BattleState.State.RETREAT:
+			# RETREAT keeps the old nearest-enemy rule and is never counted.
+			var best := -1
+			var best_dist := 0.0
+			for idx in range(k):
+				var j := scratch[idx]
+				if j == i:
+					continue
+				if state[j] == BattleState.State.DEAD:
+					continue
+				if faction_id[j] == faction_id[i]:
+					continue
+				var dx := px[j] - px[i]
+				var dy := py[j] - py[i]
+				var dist := sqrt(dx * dx + dy * dy)
+				if dist > engage_radius:
+					continue
+				if best == -1 or dist < best_dist or (dist == best_dist and j < best):
+					best = j
+					best_dist = dist
+			s.target_id[i] = best
+			continue
+
+		# ENGAGE: scored retarget (§16.3).
+		var old_target := target_id[i]
+		var own_power := power(s, i)
+		var best_j := -1
+		var best_score := 0.0
 		for idx in range(k):
 			var j := scratch[idx]
 			if j == i:
@@ -39,17 +82,38 @@ static func retarget(s: BattleState, coarse: SpatialHash, tick: int) -> void:
 			var dist := sqrt(dx * dx + dy * dy)
 			if dist > engage_radius:
 				continue
-			if best == -1 or dist < best_dist or (dist == best_dist and j < best):
-				best = j
-				best_dist = dist
-		s.target_id[i] = best
+			var att := s.attackers[j] - (1 if old_target == j else 0)
+			var want := 1
+			if power(s, j) > Tuning.OUTMATCH_RATIO * own_power:
+				want = 2
+			if is_captain[j] == 1:
+				want += 1
+			var score: float = dist / radius[i] + Tuning.CROWD_PENALTY * maxi(0, att + 1 - want)
+			if hp[j] < Tuning.FINISH_HP_FRAC * hp_max[j]:
+				score -= Tuning.FINISH_BONUS
+			if j == old_target:
+				score -= Tuning.STICKY_BONUS
+			if best_j == -1 or score < best_score or (score == best_score and j < best_j):
+				best_j = j
+				best_score = score
+
+		if best_j != old_target:
+			if old_target >= 0 and old_target < s.n and state[old_target] != BattleState.State.DEAD:
+				s.attackers[old_target] -= 1
+			if best_j >= 0:
+				s.attackers[best_j] += 1
+			s.target_id[i] = best_j
 
 
-# Accumulate: sum attraction, cohesion, separation and retreat accelerations
-# into s.ax/ay for every live marble. Does not zero ax/ay (BattleSim does).
+# Accumulate: sum attraction/recoil, spread advance, cohesion (untargeted
+# only) and retreat into a per-marble drive, cap it by cruise/charge/retreat
+# speed against the current velocity, then add the surviving drive into
+# s.ax/ay. Separation (§6, range 2.0) is a second, uncapped pass.
 static func accumulate(s: BattleState, fine: SpatialHash) -> void:
 	var px := s.px
 	var py := s.py
+	var vx := s.vx
+	var vy := s.vy
 	var radius := s.radius
 	var state := s.state
 	var faction_id := s.faction_id
@@ -60,6 +124,7 @@ static func accumulate(s: BattleState, fine: SpatialHash) -> void:
 	var faction_cx := s.faction_cx
 	var faction_cy := s.faction_cy
 	var faction_alive := s.faction_alive
+	var recoil_t := s.recoil_t
 
 	for i in range(s.n):
 		if state[i] == BattleState.State.DEAD:
@@ -68,67 +133,108 @@ static func accumulate(s: BattleState, fine: SpatialHash) -> void:
 		var r := radius[i]
 		var f := faction_id[i]
 		var retreating := state[i] == BattleState.State.RETREAT
-
-		# attraction
 		var t := target_id[i]
-		if t >= 0 and state[t] != BattleState.State.DEAD:
-			var dx := px[t] - px[i]
-			var dy := py[t] - py[i]
-			var dist := sqrt(dx * dx + dy * dy)
-			if dist > 0.0:
-				var mag := Tuning.K_ATTR * aggression[i] * morale[i]
-				if retreating:
-					mag = -mag
-				s.ax[i] += mag * dx / dist
-				s.ay[i] += mag * dy / dist
+		var target_live := t >= 0 and state[t] != BattleState.State.DEAD
 
-		# advance: pull toward nearest enemy faction centroid when no target
-		if state[i] == BattleState.State.ENGAGE and target_id[i] == -1:
+		var target_dx := 0.0
+		var target_dy := 0.0
+		var target_dist := 0.0
+		if target_live:
+			target_dx = px[t] - px[i]
+			target_dy = py[t] - py[i]
+			target_dist = sqrt(target_dx * target_dx + target_dy * target_dy)
+
+		var dx := 0.0
+		var dy := 0.0
+
+		# 1: ENGAGE with a live target: recoil back-off or attraction.
+		if not retreating and target_live and target_dist > 0.0:
+			if recoil_t[i] > 0.0:
+				dx -= Tuning.K_RECOIL * target_dx / target_dist
+				dy -= Tuning.K_RECOIL * target_dy / target_dist
+			else:
+				var attr_mag := Tuning.K_ATTR * aggression[i] * morale[i]
+				dx += attr_mag * target_dx / target_dist
+				dy += attr_mag * target_dy / target_dist
+
+		# 2: ENGAGE with no target: advance with spread toward the nearest
+		# live enemy faction centroid, aimed along a line through it.
+		if state[i] == BattleState.State.ENGAGE and t == -1:
 			var best_g := -1
-			var best_dist := 0.0
+			var best_gdist := 0.0
 			for g in range(s.faction_count):
 				if g == f:
 					continue
 				if faction_alive[g] <= 0:
 					continue
-				var cdx := faction_cx[g] - px[i]
-				var cdy := faction_cy[g] - py[i]
-				var cdist := sqrt(cdx * cdx + cdy * cdy)
-				if best_g == -1 or cdist < best_dist or (cdist == best_dist and g < best_g):
+				var gdx := faction_cx[g] - px[i]
+				var gdy := faction_cy[g] - py[i]
+				var gdist := sqrt(gdx * gdx + gdy * gdy)
+				if best_g == -1 or gdist < best_gdist or (gdist == best_gdist and g < best_g):
 					best_g = g
-					best_dist = cdist
-			if best_g >= 0 and best_dist > 0.0:
-				var cdx := faction_cx[best_g] - px[i]
-				var cdy := faction_cy[best_g] - py[i]
-				s.ax[i] += Tuning.K_ADVANCE * cdx / best_dist
-				s.ay[i] += Tuning.K_ADVANCE * cdy / best_dist
+					best_gdist = gdist
+			if best_g >= 0:
+				var cg := Vector2(faction_cx[best_g], faction_cy[best_g])
+				var cf := Vector2(faction_cx[f], faction_cy[f])
+				var pi_pos := Vector2(px[i], py[i])
+				var aim := cg
+				var gap := cg - cf
+				if gap.length() >= 1e-3:
+					var gap_u := gap.normalized()
+					var gap_w := Vector2(-gap_u.y, gap_u.x)
+					var lat := (pi_pos - cf).dot(gap_w)
+					aim = cg + gap_w * lat * Tuning.SPREAD_KEEP
+				var aim_vec := aim - pi_pos
+				var aim_dist := aim_vec.length()
+				if aim_dist > 0.0:
+					dx += Tuning.K_ADVANCE * aim_vec.x / aim_dist
+					dy += Tuning.K_ADVANCE * aim_vec.y / aim_dist
 
-		# cohesion (the captain is its own anchor: no term at all)
-		if faction_captain[f] != i:
-			var cap := faction_captain[f]
+		# 3: cohesion, only when untargeted.
+		if t == -1 and faction_captain[f] != i:
+			var captain_idx := faction_captain[f]
 			var anchor_x: float
 			var anchor_y: float
-			if cap >= 0 and state[cap] != BattleState.State.DEAD:
-				anchor_x = px[cap]
-				anchor_y = py[cap]
+			if captain_idx >= 0 and state[captain_idx] != BattleState.State.DEAD:
+				anchor_x = px[captain_idx]
+				anchor_y = py[captain_idx]
 			else:
 				anchor_x = faction_cx[f]
 				anchor_y = faction_cy[f]
-			var adx := anchor_x - px[i]
-			var ady := anchor_y - py[i]
-			var adist := sqrt(adx * adx + ady * ady)
-			if adist > 4.0 * r:
-				s.ax[i] += Tuning.K_COHESION * adx / adist
-				s.ay[i] += Tuning.K_COHESION * ady / adist
+			var coh_dx := anchor_x - px[i]
+			var coh_dy := anchor_y - py[i]
+			var coh_dist := sqrt(coh_dx * coh_dx + coh_dy * coh_dy)
+			if coh_dist > 4.0 * r:
+				dx += Tuning.K_COHESION * coh_dx / coh_dist
+				dy += Tuning.K_COHESION * coh_dy / coh_dist
 
-		# retreat: pull toward the faction's home edge
+		# 4: RETREAT: attraction sign flip plus home-edge pull.
 		if retreating:
+			if target_live and target_dist > 0.0:
+				var retreat_mag := Tuning.K_ATTR * aggression[i] * morale[i]
+				dx -= retreat_mag * target_dx / target_dist
+				dy -= retreat_mag * target_dy / target_dist
 			var home: Vector2 = Tuning.HOME_DIR[f % 4]
-			s.ax[i] += Tuning.K_ATTR * home.x
-			s.ay[i] += Tuning.K_ATTR * home.y
+			dx += Tuning.K_ATTR * home.x
+			dy += Tuning.K_ATTR * home.y
+
+		# 5: cap the drive against the current velocity; drop it if over cap.
+		var cap: float = Tuning.CRUISE_SPEED
+		if retreating:
+			cap = Tuning.RETREAT_SPEED
+		elif recoil_t[i] > 0.0 or (target_live and target_dist < Tuning.STRIKE_RANGE_MULT * r):
+			cap = Tuning.CHARGE_SPEED
+		if dx != 0.0 or dy != 0.0:
+			var drive_len := sqrt(dx * dx + dy * dy)
+			var dir_x := dx / drive_len
+			var dir_y := dy / drive_len
+			var v_par := vx[i] * dir_x + vy[i] * dir_y
+			if v_par < cap:
+				s.ax[i] += dx
+				s.ay[i] += dy
 
 	# separation (same faction, live, within range): second pass over the
-	# grid's cells, visiting each unordered pair once.
+	# grid's cells, visiting each unordered pair once. Never capped.
 	_accumulate_separation(s, fine)
 
 

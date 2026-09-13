@@ -16,12 +16,23 @@ func _init() -> void:
 	t.check(s.faction_captain[3] == -1, "faction_captain[3] == -1")
 	t.check(s.arena == Rect2(0, 0, 1600, 900), "arena == Rect2(0, 0, 1600, 900)")
 
+	# Case 1.5: bump_cd initialization with capacity 10
+	var s_bump := BattleState.new(10, 1)
+	t.check(s_bump.bump_cd.size() == 10, "bump_cd.size() == 10")
+	t.check(s_bump.boost_cd.size() == 10, "boost_cd.size() == 10")
+	t.check(s_bump.attackers.size() == 10, "attackers.size() == 10")
+	t.check(s_bump.recoil_t.size() == 10, "recoil_t.size() == 10")
+
 	# Case 2: Spawn non-captain marble
 	var i := s.spawn(100.0, 200.0, 0, 0, 1, false)
 	t.check(i == 0, "spawn returns 0")
 	t.check(s.n == 1, "n == 1 after spawn")
 	t.check(s.px[0] == 100.0, "px[0] == 100.0")
 	t.check(s.py[0] == 200.0, "py[0] == 200.0")
+	t.check(s.bump_cd[0] == 0.0, "bump_cd[0] == 0.0")
+	t.check(s.boost_cd[0] == 0.0, "boost_cd[0] == 0.0")
+	t.check(s.attackers[0] == 0, "attackers[0] == 0")
+	t.check(s.recoil_t[0] == 0.0, "recoil_t[0] == 0.0")
 	t.check(t.approx(s.radius[0], 8.0), "radius[0] approx 8.0")
 	t.check(t.approx(s.mass[0], 64.0), "mass[0] approx 64.0")
 	t.check(t.approx(s.hp[0], 100.0), "hp[0] approx 100.0")
@@ -142,6 +153,8 @@ func _init() -> void:
 	# Case 13: Event enum values
 	t.check(BattleState.Event.CAPTAIN_DEAD == 3, "BattleState.Event.CAPTAIN_DEAD == 3")
 	t.check(BattleState.Event.FLED == 4, "BattleState.Event.FLED == 4")
+	t.check(BattleState.Event.BUMP == 5, "BattleState.Event.BUMP == 5")
+	t.check(BattleState.Event.BOOST == 6, "BattleState.Event.BOOST == 6")
 
 	t.finish()
 	quit()

@@ -1,7 +1,7 @@
 class_name TerrainGrid extends RefCounted
 ## Arena cell grid: friction / slope / obstacle sample. Source: docs/ARCHITECTURE.md §10.3.
 
-enum Kind { PLAIN = 0, MUD = 1, COBBLE = 2, ICE = 3, WATER = 4, ROCK = 5, TREE = 6, TOWER = 7, FIRE = 8, SPIKE = 9 }
+enum Kind { PLAIN = 0, MUD = 1, COBBLE = 2, ICE = 3, WATER = 4, ROCK = 5, TREE = 6, TOWER = 7, FIRE = 8, SPIKE = 9, FLOWERS = 10 }
 
 var cols: int
 var rows: int
@@ -66,17 +66,8 @@ func kind_at(x: float, y: float) -> int:
 
 
 func friction_of(k: int) -> float:
-	match k:
-		Kind.MUD:
-			return Tuning.FRICTION_MUD
-		Kind.COBBLE:
-			return Tuning.FRICTION_COBBLE
-		Kind.ICE:
-			return Tuning.FRICTION_ICE
-		Kind.WATER:
-			return Tuning.FRICTION_WATER
-		_:
-			return Tuning.FRICTION
+	var keep_frac: float = Tuning.DRAG_KEEP_PER_S[k]
+	return pow(keep_frac, Tuning.DT)
 
 
 static func is_solid(k: int) -> bool:

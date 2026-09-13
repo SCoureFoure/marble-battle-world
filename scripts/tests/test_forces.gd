@@ -86,8 +86,9 @@ func _init() -> void:
 	s5.ax.fill(0.0)
 	s5.ay.fill(0.0)
 	Forces.accumulate(s5, hs5[0])
-	t.check(t.approx(s5.ax[a5], -57.5, 0.05), "case5 ax[0] approx -57.5")
-	t.check(t.approx(s5.ax[b5], 57.5, 0.05), "case5 ax[1] approx 57.5")
+	# §16: SEPARATION_RANGE_MULT now 2.0 (was 1.2) -> range 32 not 19.2, smag 82.5 not 57.5.
+	t.check(t.approx(s5.ax[a5], -82.5, 0.05), "case5 ax[0] approx -82.5")
+	t.check(t.approx(s5.ax[b5], 82.5, 0.05), "case5 ax[1] approx 82.5")
 	t.check(t.approx(s5.ay[a5], 0.0, 0.05), "case5 ay[0] approx 0")
 	t.check(t.approx(s5.ay[b5], 0.0, 0.05), "case5 ay[1] approx 0")
 
@@ -251,6 +252,207 @@ func _init() -> void:
 	Forces.accumulate(s15, hs15[0])
 	t.check(t.approx(s15.ax[a15], 0.0, 1e-3), "case15b ax[0] approx 0")
 	t.check(t.approx(s15.ay[a15], 20.0, 1e-3), "case15b ay[0] approx 20.0")
+
+	# §16.3 retarget cases (i faction 0 at (100,100); enemies faction 1).
+
+	# retarget1/2: scored retarget prefers j2 (unengaged) over nearest j1
+	# (already worked by ally k), then attackers reflects the new pick.
+	var s16 := make(16)
+	var i16 := s16.spawn(100, 100, 0, 0, 1, false)
+	var j1_16 := s16.spawn(140, 100, 1, 0, 1, false)
+	var j2_16 := s16.spawn(160, 100, 1, 0, 1, false)
+	var k16 := s16.spawn(100, 130, 0, 0, 1, false)
+	var hs16 := hashes(s16)
+	s16.target_id[k16] = j1_16
+	Forces.retarget(s16, hs16[1], 0)
+	t.check(s16.target_id[i16] == j2_16, "retarget1 target_id[i] == j2 (scored: j1 13 > j2 7.5)")
+	t.check(s16.attackers[j1_16] == 1, "retarget2 attackers[j1] == 1")
+	t.check(s16.attackers[j2_16] == 1, "retarget2 attackers[j2] == 1")
+
+	# retarget3: outmatched target (power 225 > 1.25*125) wants 2 -> no penalty, picks j1.
+	var s17 := make(17)
+	var i17 := s17.spawn(100, 100, 0, 0, 1, false)
+	var j1_17 := s17.spawn(140, 100, 1, 0, 1, false)
+	var j2_17 := s17.spawn(160, 100, 1, 0, 1, false)
+	var k17 := s17.spawn(100, 130, 0, 0, 1, false)
+	var hs17 := hashes(s17)
+	s17.target_id[k17] = j1_17
+	s17.spin[j1_17] = 200.0
+	Forces.retarget(s17, hs17[1], 0)
+	t.check(s17.target_id[i17] == j1_17, "retarget3 outmatched picks j1 (score 5)")
+
+	# retarget4: finish-off bonus (hp[j1] below FINISH_HP_FRAC) beats a farther, healthy j2.
+	var s18 := make(18)
+	var i18 := s18.spawn(100, 100, 0, 0, 1, false)
+	var j1_18 := s18.spawn(140, 100, 1, 0, 1, false)
+	var j2_18 := s18.spawn(190, 100, 1, 0, 1, false)
+	var k18 := s18.spawn(100, 130, 0, 0, 1, false)
+	var hs18 := hashes(s18)
+	s18.target_id[k18] = j1_18
+	s18.hp[j1_18] = 30.0
+	Forces.retarget(s18, hs18[1], 0)
+	t.check(s18.target_id[i18] == j1_18, "retarget4 finish-off picks j1 (5+8-4=9 < 11.25)")
+
+	# retarget5: sticky bonus keeps the current target j2 over a nearer j1.
+	var s19 := make(19)
+	var i19 := s19.spawn(100, 100, 0, 0, 1, false)
+	var j1_19 := s19.spawn(140, 100, 1, 0, 1, false)
+	var j2_19 := s19.spawn(148, 100, 1, 0, 1, false)
+	var hs19 := hashes(s19)
+	s19.target_id[i19] = j2_19
+	Forces.retarget(s19, hs19[1], 0)
+	t.check(s19.target_id[i19] == j2_19, "retarget5 sticky keeps j2 (6-2=4 < 5)")
+
+	# retarget6: captain wants +1 attacker, absorbing the crowd penalty; picks j1.
+	var s20 := make(20)
+	var i20 := s20.spawn(100, 100, 0, 0, 1, false)
+	var j1_20 := s20.spawn(140, 100, 1, 0, 1, true)
+	var j2_20 := s20.spawn(160, 100, 1, 0, 1, false)
+	var k20 := s20.spawn(100, 130, 0, 0, 1, false)
+	var hs20 := hashes(s20)
+	s20.target_id[k20] = j1_20
+	Forces.retarget(s20, hs20[1], 0)
+	t.check(s20.target_id[i20] == j1_20, "retarget6 captain picks j1 (want 2, no penalty, score 5)")
+
+	# retarget7: a RETREAT ally's target is never counted in attackers.
+	var s21 := make(21)
+	var i21 := s21.spawn(100, 100, 0, 0, 1, false)
+	var j1_21 := s21.spawn(140, 100, 1, 0, 1, false)
+	var j2_21 := s21.spawn(160, 100, 1, 0, 1, false)
+	var k21 := s21.spawn(100, 130, 0, 0, 1, false)
+	var hs21 := hashes(s21)
+	s21.target_id[k21] = j1_21
+	s21.state[k21] = BattleState.State.RETREAT
+	Forces.retarget(s21, hs21[1], 0)
+	t.check(s21.attackers[j1_21] == 1, "retarget7 attackers[j1] == 1 (i counted, RETREAT ally not)")
+	t.check(s21.target_id[i21] == j1_21, "retarget7 i picks j1 (nearest, no crowd)")
+
+	# §16.3 accumulate cases (lone faction-0 marble i unless stated).
+
+	# accum8: no target -> advance toward the enemy centroid, no spread offset.
+	var s22 := make(22)
+	var i22 := s22.spawn(400, 450, 0, 0, 1, false)
+	var hs22 := hashes(s22)
+	s22.faction_alive[1] = 1
+	s22.faction_count = 2
+	s22.faction_cx[0] = 400.0
+	s22.faction_cy[0] = 450.0
+	s22.faction_cx[1] = 1200.0
+	s22.faction_cy[1] = 450.0
+	s22.ax.fill(0.0)
+	s22.ay.fill(0.0)
+	Forces.accumulate(s22, hs22[0])
+	t.check(t.approx(s22.ax[i22], 20.0, 1e-3), "accum8 ax approx K_ADVANCE 20.0")
+	t.check(t.approx(s22.ay[i22], 0.0, 1e-3), "accum8 ay approx 0")
+
+	# accum9: cruise cap (v_par 80 >= 70) drops the advance drive entirely.
+	var s23 := make(23)
+	var i23 := s23.spawn(400, 450, 0, 0, 1, false)
+	var hs23 := hashes(s23)
+	s23.faction_alive[1] = 1
+	s23.faction_cx[0] = 400.0
+	s23.faction_cy[0] = 450.0
+	s23.faction_cx[1] = 1200.0
+	s23.faction_cy[1] = 450.0
+	s23.vx[i23] = 80.0
+	s23.ax.fill(0.0)
+	s23.ay.fill(0.0)
+	Forces.accumulate(s23, hs23[0])
+	t.check(t.approx(s23.ax[i23], 0.0, 1e-3), "accum9 ax dropped by cruise cap")
+	t.check(t.approx(s23.ay[i23], 0.0, 1e-3), "accum9 ay dropped by cruise cap")
+
+	# accum10: lateral offset from own centroid spreads the aim point along the line.
+	var s24 := make(24)
+	var i24 := s24.spawn(400, 250, 0, 0, 1, false)
+	var hs24 := hashes(s24)
+	s24.faction_alive[1] = 1
+	s24.faction_count = 2
+	s24.faction_cx[0] = 400.0
+	s24.faction_cy[0] = 450.0
+	s24.faction_cx[1] = 1200.0
+	s24.faction_cy[1] = 450.0
+	s24.ax.fill(0.0)
+	s24.ay.fill(0.0)
+	Forces.accumulate(s24, hs24[0])
+	t.check(t.approx(s24.ax[i24], 20.0, 1e-3), "accum10 ax approx 20.0 (spread aim)")
+	t.check(t.approx(s24.ay[i24], 15.0, 1e-3), "accum10 ay approx 15.0 (spread + cohesion)")
+
+	# accum11: within strike range (dist 40 < 48) -> charge cap allows the attraction drive.
+	var s25 := make(25)
+	var i25 := s25.spawn(400, 450, 0, 0, 1, false)
+	var t25 := s25.spawn(440, 450, 1, 0, 1, false)
+	var hs25 := hashes(s25)
+	s25.target_id[i25] = t25
+	s25.vx[i25] = 150.0
+	s25.ax.fill(0.0)
+	s25.ay.fill(0.0)
+	Forces.accumulate(s25, hs25[0])
+	t.check(t.approx(s25.ax[i25], 32.0, 1e-3), "accum11 charge ax approx K_ATTR*1*0.8=32")
+
+	# accum12: too far to charge (dist 100 >= 48) -> cruise cap (70) drops the drive.
+	var s26 := make(26)
+	var i26 := s26.spawn(400, 450, 0, 0, 1, false)
+	var t26 := s26.spawn(500, 450, 1, 0, 1, false)
+	var hs26 := hashes(s26)
+	s26.target_id[i26] = t26
+	s26.vx[i26] = 150.0
+	s26.ax.fill(0.0)
+	s26.ay.fill(0.0)
+	Forces.accumulate(s26, hs26[0])
+	t.check(t.approx(s26.ax[i26], 0.0, 1e-3), "accum12 ax dropped, cruise cap 70 (dist 100 >= 48)")
+
+	# accum13: recoiling replaces attraction with a back-off term.
+	var s27 := make(27)
+	var i27 := s27.spawn(400, 450, 0, 0, 1, false)
+	var t27 := s27.spawn(440, 450, 1, 0, 1, false)
+	var hs27 := hashes(s27)
+	s27.target_id[i27] = t27
+	s27.recoil_t[i27] = 0.3
+	s27.ax.fill(0.0)
+	s27.ay.fill(0.0)
+	Forces.accumulate(s27, hs27[0])
+	t.check(t.approx(s27.ax[i27], -25.0, 1e-3), "accum13 recoil ax approx -K_RECOIL=-25, no attraction")
+
+	# accum14: cohesion only fires when untargeted.
+	var s28 := make(28)
+	var cap28 := s28.spawn(100, 450, 0, 0, 1, true)
+	var i28 := s28.spawn(400, 450, 0, 0, 1, false)
+	var t28 := s28.spawn(440, 450, 1, 0, 1, false)
+	var hs28 := hashes(s28)
+	s28.target_id[i28] = t28
+	s28.ax.fill(0.0)
+	s28.ay.fill(0.0)
+	Forces.accumulate(s28, hs28[0])
+	t.check(t.approx(s28.ax[i28], 32.0, 1e-3), "accum14a targeted: attraction only, no cohesion")
+	s28.target_id[i28] = -1
+	s28.faction_alive[1] = 0
+	s28.ax.fill(0.0)
+	s28.ay.fill(0.0)
+	Forces.accumulate(s28, hs28[0])
+	t.check(s28.ax[i28] < 0.0, "accum14b untargeted, no enemy alive: cohesion pulls toward captain")
+
+	# accum15: RETREAT speed cap (v_par 120 >= 110) drops the home pull.
+	var s29 := make(29)
+	var i29 := s29.spawn(400, 450, 0, 0, 1, false)
+	var hs29 := hashes(s29)
+	s29.state[i29] = BattleState.State.RETREAT
+	s29.vx[i29] = -120.0
+	s29.ax.fill(0.0)
+	s29.ay.fill(0.0)
+	Forces.accumulate(s29, hs29[0])
+	t.check(t.approx(s29.ax[i29], 0.0, 1e-3), "accum15 retreat cap drops home pull (v_par 120 >= 110)")
+
+	# accum16: separation at range 2.0 (32) reaches a 30-apart pair; 1.2 range (19.2) would not.
+	var s30 := make(30)
+	var i30 := s30.spawn(400, 450, 0, 0, 1, false)
+	var j30 := s30.spawn(430, 450, 0, 0, 1, false)
+	var hs30 := hashes(s30)
+	s30.faction_cx[0] = 415.0
+	s30.faction_cy[0] = 450.0
+	s30.ax.fill(0.0)
+	s30.ay.fill(0.0)
+	Forces.accumulate(s30, hs30[0])
+	t.check(s30.ax[i30] < 0.0 and s30.ax[j30] > 0.0, "accum16 separation at range 2.0 pushes both apart (guard: 1.2 range 19.2 would give 0)")
 
 	t.finish()
 	quit()

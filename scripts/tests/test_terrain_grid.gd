@@ -40,14 +40,14 @@ func _init() -> void:
 	t.check(G.kind[22 * 40 + 39] == TerrainGrid.Kind.ICE, "case4 ice corner")
 
 	# 5. friction_of
-	t.check(t.approx(G.friction_of(TerrainGrid.Kind.PLAIN), 0.92), "case5 friction plain")
-	t.check(t.approx(G.friction_of(TerrainGrid.Kind.MUD), 0.80), "case5 friction mud")
-	t.check(t.approx(G.friction_of(TerrainGrid.Kind.COBBLE), 0.98), "case5 friction cobble")
-	t.check(t.approx(G.friction_of(TerrainGrid.Kind.ICE), 0.99), "case5 friction ice")
-	t.check(t.approx(G.friction_of(TerrainGrid.Kind.WATER), 0.70), "case5 friction water")
-	t.check(t.approx(G.friction_of(TerrainGrid.Kind.ROCK), 0.92), "case5 friction rock")
-	t.check(t.approx(G.friction_of(TerrainGrid.Kind.TOWER), 0.92), "case5 friction tower")
-	t.check(t.approx(G.friction_of(TerrainGrid.Kind.FIRE), 0.92), "case5 friction fire")
+	t.check(t.approx(G.friction_of(TerrainGrid.Kind.PLAIN), pow(0.12, 1.0/60.0)), "case5 friction plain")  # M8 pace
+	t.check(t.approx(G.friction_of(TerrainGrid.Kind.MUD), pow(0.02, 1.0/60.0)), "case5 friction mud")  # M8 pace
+	t.check(t.approx(G.friction_of(TerrainGrid.Kind.ICE), pow(0.60, 1.0/60.0)), "case5 friction ice")  # M8 pace
+	t.check(t.approx(G.friction_of(TerrainGrid.Kind.WATER), pow(0.01, 1.0/60.0)), "case5 friction water")  # M8 pace
+	t.check(t.approx(G.friction_of(TerrainGrid.Kind.FLOWERS), pow(0.12, 1.0/60.0)), "case5 friction flowers")  # M8 pace
+	t.check(t.approx(pow(G.friction_of(TerrainGrid.Kind.PLAIN), 60), 0.12, 1e-3), "case5 pow friction plain 60")  # M8 pace
+	t.check(TerrainGrid.Kind.FLOWERS == 10, "case5 flowers enum value")
+	t.check(not TerrainGrid.is_solid(10), "case5 flowers not solid")
 
 	# 6. is_solid
 	t.check(TerrainGrid.is_solid(TerrainGrid.Kind.ROCK), "case6 rock solid")
@@ -146,11 +146,15 @@ func _init() -> void:
 	t.check(G4.near_solid[6 * 40 + 6] == 1, "case11 near_solid opposite corner in range")
 	t.check(G4.near_solid[3 * 40 + 3] == 0, "case11 near_solid out of range")
 	t.check(G4.near_solid[5 * 40 + 7] == 0, "case11 near_solid out of range x")
-	t.check(t.approx(G4.friction[5 * 40 + 5], 0.92), "case11 friction rock approx 0.92")
+	t.check(t.approx(G4.friction[5 * 40 + 5], pow(0.12, 1.0/60.0)), "case11 friction rock approx pow(0.12, 1/60)")  # M8 pace
 	G4.set_cell(0, 0, TerrainGrid.Kind.MUD)
 	t.check(G4.dirty == true, "case11 dirty after set_cell")
 	G4.finalize()
-	t.check(t.approx(G4.friction[0], 0.80), "case11 friction mud approx 0.80")
+	t.check(t.approx(G4.friction[0], pow(0.02, 1.0/60.0)), "case11 friction mud approx pow(0.02, 1/60)")  # M8 pace
+	G4.set_cell(3, 3, TerrainGrid.Kind.FLOWERS)
+	t.check(G4.dirty == true, "case11 dirty after set flowers")
+	G4.finalize()
+	t.check(t.approx(G4.friction[3 * 40 + 3], pow(0.12, 1.0/60.0)), "case11 friction flowers approx pow(0.12, 1/60)")  # M8 pace
 
 	t.finish()
 	quit()

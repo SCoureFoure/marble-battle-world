@@ -44,6 +44,14 @@ func _draw() -> void:
 				# width 2" -- using black for visibility against the base fill.
 				draw_line(rect.position, rect.position + rect.size, Color(0, 0, 0), 2.0)
 				draw_line(rect.position + Vector2(rect.size.x, 0), rect.position + Vector2(0, rect.size.y), Color(0, 0, 0), 2.0)
+			TerrainGrid.Kind.FLOWERS:
+				draw_rect(rect, Color(0.62, 0.78, 0.42))
+				var p1 := top_left + Vector2(0.25, 0.3) * grid.cell
+				var p2 := top_left + Vector2(0.7, 0.45) * grid.cell
+				var p3 := top_left + Vector2(0.4, 0.75) * grid.cell
+				draw_circle(p1, 3.0, Color(0.95, 0.60, 0.80))
+				draw_circle(p2, 3.0, Color(0.95, 0.60, 0.80))
+				draw_circle(p3, 3.0, Color(0.95, 0.60, 0.80))
 
 
 func mark_dirty() -> void:

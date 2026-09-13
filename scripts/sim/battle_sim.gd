@@ -113,6 +113,7 @@ func step(s: BattleState, dt: float) -> void:
 	var near_solid: PackedByteArray = terrain.near_solid if terrain else PackedByteArray()
 	var slope_x: PackedFloat32Array = terrain.slope_x if terrain else PackedFloat32Array()
 	var slope_y: PackedFloat32Array = terrain.slope_y if terrain else PackedFloat32Array()
+	var fr_plain: float = pow(Tuning.DRAG_KEEP_PER_S[0], dt)
 
 	for i in range(s.n):
 		if s.state[i] == BattleState.State.DEAD:
@@ -130,7 +131,7 @@ func step(s: BattleState, dt: float) -> void:
 		if terrain:
 			vx += slope_x[c] * Tuning.FORCE_SCALE * dt
 			vy += slope_y[c] * Tuning.FORCE_SCALE * dt
-		var fr: float = friction[c] if terrain else Tuning.FRICTION
+		var fr: float = friction[c] if terrain else fr_plain
 		vx *= fr
 		vy *= fr
 
@@ -261,7 +262,11 @@ func step(s: BattleState, dt: float) -> void:
 	for i in range(s.n):
 		if s.state[i] == BattleState.State.DEAD:
 			continue
-		s.spin[i] = maxf(Tuning.RPM_MIN, s.spin[i] - Tuning.SPIN_DECAY * dt)
+		var k: int = kind[terrain.cell_at(s.px[i], s.py[i])] if terrain else TerrainGrid.Kind.PLAIN
+		s.spin[i] = clampf(s.spin[i] + Tuning.SPIN_RATE[k] * dt, Tuning.RPM_MIN, s.spin_cap[i])
+		s.bump_cd[i] = maxf(0.0, s.bump_cd[i] - dt)
+		s.boost_cd[i] = maxf(0.0, s.boost_cd[i] - dt)
+		s.recoil_t[i] = maxf(0.0, s.recoil_t[i] - dt)
 
 	# transitions: captain aura, ENGAGE -> RETREAT, RETREAT at home edge -> fled
 	for i in range(s.n):

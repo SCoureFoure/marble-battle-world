@@ -1,9 +1,6 @@
 class_name Weapons
 extends RefCounted
 
-static var force_roll: float = -1.0
-
-
 static func tick(s: BattleState, fine: SpatialHash, dt: float) -> void:
 	for i in range(s.n):
 		if s.state[i] == BattleState.State.DEAD:
@@ -49,20 +46,11 @@ static func tick(s: BattleState, fine: SpatialHash, dt: float) -> void:
 			s.hit_cd[i] = Tuning.WEAPON_RECHECK
 			continue
 
-		# 4. roll
-		var roll: float = force_roll if force_roll >= 0.0 else s.rng.randf()
-		var mult: float
-		if roll < Tuning.CRIT_CHANCE:
-			mult = Tuning.CRIT_MULT
-		elif roll < Tuning.CRIT_CHANCE + Tuning.FUMBLE_CHANCE:
-			s.spin[i] = maxf(Tuning.RPM_MIN, s.spin[i] - Tuning.FUMBLE_SPIN_LOSS)
-			s.hit_cd[i] = Tuning.WEAPON_COOLDOWN[w]
-			continue
-		else:
-			mult = 1.0
+		# 4. roll (no fumble branch)
+		var m: float = Damage.roll(s, Tuning.WEAPON_CRIT_CHANCE[w])
 
 		# 5. damage (with shield facing check)
-		var dmg: float = Tuning.WEAPON_DMG[w] * (s.spin[i] / Tuning.SPIN_REF) * Tuning.RANK_MULT[s.rank[i]] * mult
+		var dmg: float = Tuning.WEAPON_DMG[w] * Tuning.WEAPON_DMG_MULT * (s.spin[i] / Tuning.SPIN_REF) * Tuning.RANK_MULT[s.rank[i]] * m
 		if s.weapon_id[best_j] == 4:
 			var fdx: float = s.px[i] - s.px[best_j]
 			var fdy: float = s.py[i] - s.py[best_j]
@@ -73,7 +61,7 @@ static func tick(s: BattleState, fine: SpatialHash, dt: float) -> void:
 				if dot > Tuning.SHIELD_FACING_DOT:
 					dmg *= Tuning.SHIELD_DMG_MULT
 
-		# 6. knockback (velocity impulse, mass-independent)
+		# 6. knockback (velocity impulse, mass-independent) and recoil, spins before step 7
 		var resist: float = maxf(Tuning.KB_SPIN_RESIST_MIN, s.spin[best_j] / Tuning.SPIN_REF)
 		var kb: float = Tuning.WEAPON_KB[w] * (s.spin[i] / Tuning.SPIN_REF) / resist
 		var kdx: float = s.px[best_j] - s.px[i]
@@ -82,39 +70,13 @@ static func tick(s: BattleState, fine: SpatialHash, dt: float) -> void:
 		if klen > 0.0:
 			s.vx[best_j] += (kdx / klen) * kb
 			s.vy[best_j] += (kdy / klen) * kb
+			s.vx[i] -= (kdx / klen) * kb * Tuning.RECOIL_FRAC
+			s.vy[i] -= (kdy / klen) * kb * Tuning.RECOIL_FRAC
 
-		# 7. apply damage, xp, cooldown, event
-		s.hp[best_j] -= dmg
-		s.xp[i] += Tuning.XP_PER_HIT
+		# 7. spin cost
+		s.spin[i] = maxf(Tuning.RPM_MIN, s.spin[i] - Tuning.HIT_SPIN_COST_ATTACKER)
+		s.spin[best_j] = maxf(Tuning.RPM_MIN, s.spin[best_j] - Tuning.HIT_SPIN_COST_DEFENDER)
+
+		# 8. cooldown; damage/xp/kill/rank-up via Damage.apply
 		s.hit_cd[i] = Tuning.WEAPON_COOLDOWN[w]
-		s.events.append([BattleState.Event.HIT, i, best_j])
-
-		# 8. kill check
-		if s.hp[best_j] <= 0.0:
-			s.state[best_j] = BattleState.State.DEAD
-			s.hp[best_j] = 0.0
-			s.kills[i] += 1
-			s.xp[i] += Tuning.XP_PER_KILL
-			var fj: int = s.faction_id[best_j]
-			s.faction_alive[fj] -= 1
-			s.events.append([BattleState.Event.KILL, i, best_j])
-			var captain_dead: bool = s.is_captain[best_j] == 1
-			for m in range(s.n):
-				if s.state[m] != BattleState.State.DEAD and s.faction_id[m] == fj:
-					s.morale[m] = maxf(0.0, s.morale[m] + Tuning.MORALE_HIT_ALLY_DEATH)
-					if captain_dead:
-						s.morale[m] = maxf(0.0, s.morale[m] + Tuning.MORALE_HIT_CAPTAIN_DEAD)
-			if captain_dead:
-				s.faction_captain[fj] = -1
-				s.events.append([BattleState.Event.CAPTAIN_DEAD, i, best_j])
-
-		# 9. rank-up check (after xp changes)
-		while s.rank[i] < 3 and s.xp[i] >= Tuning.RANK_XP[s.rank[i] + 1]:
-			s.rank[i] += 1
-			var rk: int = s.rank[i]
-			s.spin_cap[i] = Tuning.SPIN_CAP[rk]
-			var old_hp_max: float = s.hp_max[i]
-			s.hp_max[i] = Tuning.HP_BASE * Tuning.RANK_MULT[rk]
-			s.hp[i] += s.hp_max[i] - old_hp_max
-			s.mass[i] = s.radius[i] * s.radius[i] * Tuning.RANK_MULT[rk]
-			s.events.append([BattleState.Event.LEVEL, i, rk])
+		Damage.apply(s, i, best_j, dmg, BattleState.Event.HIT)

@@ -87,6 +87,8 @@ func _process(_dt: float) -> void:
 	# child of the SubViewport); calling it again here would rebuild all three
 	# multimesh buffers twice per frame.
 
+	renderer.ingest(inst.state)
+
 	for event in inst.state.events:
 		var etype: int = event[0]
 		var actor: int = event[1]

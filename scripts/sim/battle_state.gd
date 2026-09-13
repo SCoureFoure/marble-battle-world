@@ -1,7 +1,7 @@
 class_name BattleState extends RefCounted
 
 enum State { ENGAGE = 0, RETREAT = 1, DEAD = 2 }
-enum Event { HIT = 0, KILL = 1, LEVEL = 2, CAPTAIN_DEAD = 3, FLED = 4 }
+enum Event { HIT = 0, KILL = 1, LEVEL = 2, CAPTAIN_DEAD = 3, FLED = 4, BUMP = 5, BOOST = 6 }
 
 var n: int = 0
 var cap: int
@@ -26,6 +26,9 @@ var spin: PackedFloat32Array
 var spin_cap: PackedFloat32Array
 var weapon_angle: PackedFloat32Array
 var hit_cd: PackedFloat32Array
+var bump_cd: PackedFloat32Array
+var boost_cd: PackedFloat32Array
+var recoil_t: PackedFloat32Array
 var morale: PackedFloat32Array
 var aggression: PackedFloat32Array
 
@@ -38,6 +41,7 @@ var captain_id: PackedInt32Array
 var kills: PackedInt32Array
 var xp: PackedInt32Array
 var target_id: PackedInt32Array
+var attackers: PackedInt32Array
 var is_captain: PackedByteArray
 var fled: PackedByteArray
 
@@ -77,6 +81,9 @@ func _init(capacity: int, seed: int) -> void:
 	spin_cap.resize(capacity)
 	weapon_angle.resize(capacity)
 	hit_cd.resize(capacity)
+	bump_cd.resize(capacity)
+	boost_cd.resize(capacity)
+	recoil_t.resize(capacity)
 	morale.resize(capacity)
 	aggression.resize(capacity)
 	weapon_id.resize(capacity)
@@ -87,6 +94,7 @@ func _init(capacity: int, seed: int) -> void:
 	kills.resize(capacity)
 	xp.resize(capacity)
 	target_id.resize(capacity)
+	attackers.resize(capacity)
 	is_captain.resize(capacity)
 	fled.resize(capacity)
 
@@ -109,6 +117,9 @@ func _init(capacity: int, seed: int) -> void:
 	spin_cap.fill(0.0)
 	weapon_angle.fill(0.0)
 	hit_cd.fill(0.0)
+	bump_cd.fill(0.0)
+	boost_cd.fill(0.0)
+	recoil_t.fill(0.0)
 	morale.fill(0.0)
 	aggression.fill(0.0)
 	weapon_id.fill(0)
@@ -117,6 +128,7 @@ func _init(capacity: int, seed: int) -> void:
 	state.fill(0)
 	kills.fill(0)
 	xp.fill(0)
+	attackers.fill(0)
 	is_captain.fill(0)
 	fled.fill(0)
 	events = []
@@ -194,6 +206,10 @@ func spawn(x: float, y: float, faction: int, rank_: int, weapon: int, captain: b
 	target_id[idx] = -1
 	captain_id[idx] = -1
 	hit_cd[idx] = 0.0
+	bump_cd[idx] = 0.0
+	boost_cd[idx] = 0.0
+	recoil_t[idx] = 0.0
+	attackers[idx] = 0
 
 	# Initialize combat stats
 	kills[idx] = 0

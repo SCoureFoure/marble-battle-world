@@ -25,10 +25,23 @@ func _init() -> void:
 	t.check(Tuning.ARENA_H == 900.0, "Tuning.ARENA_H == 900.0")
 	t.check(Tuning.T_MAX_BATTLE == 120.0, "Tuning.T_MAX_BATTLE == 120.0")
 	t.check(Tuning.K_ADVANCE == 20.0, "Tuning.K_ADVANCE == 20.0")
-	t.check(Tuning.HAZARD_DPS.size() == 10, "Tuning.HAZARD_DPS.size() == 10")
+	t.check(Tuning.HAZARD_DPS.size() == 11, "Tuning.HAZARD_DPS.size() == 11")
 	t.check(Tuning.HAZARD_DPS[8] == 8.0, "Tuning.HAZARD_DPS[8] == 8.0")
 	t.check(Tuning.HAZARD_DPS[9] == 15.0, "Tuning.HAZARD_DPS[9] == 15.0")
 	t.check(Tuning.HAZARD_DPS[0] == 0.0, "Tuning.HAZARD_DPS[0] == 0.0")
+	t.check(Tuning.HAZARD_DPS[10] == 0.0, "Tuning.HAZARD_DPS[10] == 0.0")
+	t.check(Tuning.DRAG_KEEP_PER_S.size() == 11, "Tuning.DRAG_KEEP_PER_S.size() == 11")
+	t.check(t.approx(Tuning.DRAG_KEEP_PER_S[0], 0.12), "Tuning.DRAG_KEEP_PER_S[0] == 0.12")  # M8 pace
+	t.check(t.approx(Tuning.DRAG_KEEP_PER_S[4], 0.01), "Tuning.DRAG_KEEP_PER_S[4] == 0.01")  # M8 pace
+	t.check(Tuning.SPIN_RATE.size() == 11, "Tuning.SPIN_RATE.size() == 11")
+	t.check(Tuning.SPIN_RATE[0] == 3.0, "Tuning.SPIN_RATE[0] == 3.0")
+	t.check(Tuning.SPIN_RATE[1] == -15.0, "Tuning.SPIN_RATE[1] == -15.0")
+	t.check(Tuning.SPIN_RATE[10] == 12.0, "Tuning.SPIN_RATE[10] == 12.0")
+	t.check(Tuning.WEAPON_CRIT_CHANCE.size() == Tuning.WEAPON_COUNT, "Tuning.WEAPON_CRIT_CHANCE.size() == Tuning.WEAPON_COUNT")
+	t.check(Tuning.WEAPON_CRIT_CHANCE[0] == 0.15, "Tuning.WEAPON_CRIT_CHANCE[0] == 0.15")
+	t.check(Tuning.WEAPON_CRIT_CHANCE[3] == 0.0, "Tuning.WEAPON_CRIT_CHANCE[3] == 0.0")
+	t.check(Tuning.BODY_DMG * 1.0 < Tuning.WEAPON_DMG[0] * Tuning.WEAPON_DMG_MULT, "Tuning.BODY_DMG * 1.0 < Tuning.WEAPON_DMG[0] * Tuning.WEAPON_DMG_MULT")
+	t.check(Tuning.CRIT_MULT == 2.0, "Tuning.CRIT_MULT == 2.0")
 	t.check(Tuning.FRICTION_WATER == 0.70, "Tuning.FRICTION_WATER == 0.70")
 	t.check(Tuning.FRICTION_ICE == 0.99, "Tuning.FRICTION_ICE == 0.99")
 	t.check(Tuning.TERRAIN_CELL == 40.0, "Tuning.TERRAIN_CELL == 40.0")
@@ -58,6 +71,23 @@ func _init() -> void:
 
 	t.check(Tuning.SAVE_VERSION == 1, "Tuning.SAVE_VERSION == 1")
 	t.check(Tuning.SPEED_STEPS.size() == 3, "Tuning.SPEED_STEPS.size() == 3")
+
+	t.check(Tuning.ALLY_MIN_VREL == 80.0, "Tuning.ALLY_MIN_VREL == 80.0")
+	t.check(Tuning.BOOST_COOLDOWN == 1.5, "Tuning.BOOST_COOLDOWN == 1.5")
+
+	t.check(Tuning.CRUISE_SPEED == 50.0, "Tuning.CRUISE_SPEED == 50.0")  # M8 pace
+	t.check(Tuning.CHARGE_SPEED == 160.0, "Tuning.CHARGE_SPEED == 160.0")  # M8 pace
+	t.check(Tuning.RETREAT_SPEED == 80.0, "Tuning.RETREAT_SPEED == 80.0")  # M8 pace
+	t.check(Tuning.STRIKE_RANGE_MULT == 6.0, "Tuning.STRIKE_RANGE_MULT == 6.0")
+	t.check(Tuning.RECOIL_TIME == 0.45, "Tuning.RECOIL_TIME == 0.45")
+	t.check(Tuning.K_RECOIL == 25.0, "Tuning.K_RECOIL == 25.0")
+	t.check(Tuning.OUTMATCH_RATIO == 1.25, "Tuning.OUTMATCH_RATIO == 1.25")
+	t.check(Tuning.CROWD_PENALTY == 8.0, "Tuning.CROWD_PENALTY == 8.0")
+	t.check(Tuning.FINISH_HP_FRAC == 0.35, "Tuning.FINISH_HP_FRAC == 0.35")
+	t.check(Tuning.FINISH_BONUS == 4.0, "Tuning.FINISH_BONUS == 4.0")
+	t.check(Tuning.STICKY_BONUS == 2.0, "Tuning.STICKY_BONUS == 2.0")
+	t.check(Tuning.SPREAD_KEEP == 1.0, "Tuning.SPREAD_KEEP == 1.0")
+	t.check(Tuning.CRUISE_SPEED < Tuning.RETREAT_SPEED and Tuning.RETREAT_SPEED < Tuning.CHARGE_SPEED and Tuning.CHARGE_SPEED <= Tuning.MAX_SPEED, "CRUISE_SPEED < RETREAT_SPEED and RETREAT_SPEED < CHARGE_SPEED and CHARGE_SPEED <= MAX_SPEED")
 
 	t.finish()
 	quit()

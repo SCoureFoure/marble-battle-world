@@ -150,5 +150,91 @@ func _init() -> void:
 	TerrainGen.from_tile(g10b, WorldMap.Kind.FOREST, edges, rng10b)
 	t.check(g10a.kind == g10b.kind, "case10 forest deterministic replay")
 
+	# 11. PLAINS flowers count range
+	var plains_flower_counts := PackedInt32Array()
+	for seed_idx in range(1, 11):
+		var g11 := TerrainGrid.new()
+		g11.setup(Rect2(0, 0, 1600, 900), 40.0)
+		var rng11 := RandomNumberGenerator.new()
+		rng11.seed = seed_idx
+		TerrainGen.from_tile(g11, WorldMap.Kind.PLAINS, edges, rng11)
+		var flower_count11 := 0
+		for i in g11.kind.size():
+			if g11.kind[i] == TerrainGrid.Kind.FLOWERS:
+				flower_count11 += 1
+		plains_flower_counts.append(flower_count11)
+		t.check(flower_count11 >= 1 and flower_count11 <= 18, "case11 plains flowers count seed %d" % seed_idx)
+	var high_count := 0
+	for flower_cnt in plains_flower_counts:
+		if flower_cnt >= 9:
+			high_count += 1
+	t.check(high_count >= 8, "case11 plains flowers >= 9 for at least 8 seeds")
+
+	# 12. RUIN and GRAVEYARD zero flowers
+	var g12_ruin := TerrainGrid.new()
+	g12_ruin.setup(Rect2(0, 0, 1600, 900), 40.0)
+	var rng12_ruin := RandomNumberGenerator.new()
+	rng12_ruin.seed = 1
+	TerrainGen.from_tile(g12_ruin, WorldMap.Kind.RUIN, edges, rng12_ruin)
+	var ruin_flowers := 0
+	for i in g12_ruin.kind.size():
+		if g12_ruin.kind[i] == TerrainGrid.Kind.FLOWERS:
+			ruin_flowers += 1
+	t.check(ruin_flowers == 0, "case12 ruin zero flowers")
+
+	var g12_gy := TerrainGrid.new()
+	g12_gy.setup(Rect2(0, 0, 1600, 900), 40.0)
+	var rng12_gy := RandomNumberGenerator.new()
+	rng12_gy.seed = 1
+	TerrainGen.from_tile(g12_gy, WorldMap.Kind.GRAVEYARD, edges, rng12_gy)
+	var gy_flowers := 0
+	for i in g12_gy.kind.size():
+		if g12_gy.kind[i] == TerrainGrid.Kind.FLOWERS:
+			gy_flowers += 1
+	t.check(gy_flowers == 0, "case12 graveyard zero flowers")
+
+	# 13. Flowers not in spawn rects
+	for seed_idx in range(1, 6):
+		for tile_kind in [WorldMap.Kind.PLAINS, WorldMap.Kind.FOREST, WorldMap.Kind.TOWN]:
+			var g13 := TerrainGrid.new()
+			g13.setup(Rect2(0, 0, 1600, 900), 40.0)
+			var rng13 := RandomNumberGenerator.new()
+			rng13.seed = seed_idx
+			TerrainGen.from_tile(g13, tile_kind, edges, rng13)
+			var flower_in_spawn := false
+			for i in g13.kind.size():
+				if g13.kind[i] == TerrainGrid.Kind.FLOWERS:
+					var p13: Vector2 = g13.cell_center(i)
+					for e in edges:
+						if BattleBridge.spawn_rect(e).has_point(p13):
+							flower_in_spawn = true
+			t.check(not flower_in_spawn, "case13 flowers not in spawn rect tile=%d seed=%d" % [tile_kind, seed_idx])
+
+	# 14. Flowers determinism
+	var g14a := TerrainGrid.new()
+	g14a.setup(Rect2(0, 0, 1600, 900), 40.0)
+	var rng14a := RandomNumberGenerator.new()
+	rng14a.seed = 7
+	TerrainGen.from_tile(g14a, WorldMap.Kind.PLAINS, edges, rng14a)
+
+	var g14b := TerrainGrid.new()
+	g14b.setup(Rect2(0, 0, 1600, 900), 40.0)
+	var rng14b := RandomNumberGenerator.new()
+	rng14b.seed = 7
+	TerrainGen.from_tile(g14b, WorldMap.Kind.PLAINS, edges, rng14b)
+	t.check(g14a.kind == g14b.kind, "case14 flowers deterministic replay")
+
+	# 15. FOREST flowers guard
+	var g15 := TerrainGrid.new()
+	g15.setup(Rect2(0, 0, 1600, 900), 40.0)
+	var rng15 := RandomNumberGenerator.new()
+	rng15.seed = 1
+	TerrainGen.from_tile(g15, WorldMap.Kind.FOREST, edges, rng15)
+	var tree_count15 := 0
+	for i in g15.kind.size():
+		if g15.kind[i] == TerrainGrid.Kind.TREE:
+			tree_count15 += 1
+	t.check(tree_count15 >= 10 and tree_count15 <= 20, "case15 forest tree count with flowers")
+
 	t.finish()
 	quit()

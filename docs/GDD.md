@@ -261,3 +261,4 @@ Player controls one captain lineage inside same sim. Same data, same loop. Playe
 - [ ] M5: xp/rank persistence, captain lineage, traits, kingdom trait vector, split/death/rebirth.
 - [ ] M6: LOD statistical battles, save/load, time slider, spectate panel, timeline.
 - [ ] M7: native port if needed.
+- [ ] Later (bookmarked 2026-09-13): battle camera auto-zoom — battle view zooms ~1.5–2.5× onto where fighting is happening and pans smoothly, so weapon silhouettes (drawn at true hitbox size, ARCHITECTURE §16.5) are readable. Rendering-only; sim unchanged. Alternative considered: marble radius 8 → 12.
