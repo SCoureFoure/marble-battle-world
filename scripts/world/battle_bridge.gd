@@ -271,19 +271,23 @@ static func _process_rebirth(world: World, inst: BattleInstance, winner_world: i
 		if founder_rank >= Tuning.LEGEND_RANK:
 			ruin = _nearest_ruin_tile(world, stacks.x[stack], stacks.y[stack])
 
-		if founder_rank >= Tuning.LEGEND_RANK and ruin != Vector2i(-1, -1):
+		var did_found := false
+		if founder_rank >= Tuning.LEGEND_RANK and ruin != Vector2i(-1, -1) and stacks.n < stacks.cap:
 			var g := Kingdoms.new_faction(world, wf)
-			var center := world.map.center_of(ruin.x, ruin.y)
-			var new_stack := stacks.add(g, center.x, center.y, NameGen.stack_name(world.rng))
-			for u2 in fled_list:
-				units.faction[u2] = g
-				units.stack[u2] = new_stack
-			if units.is_captain[founder] == 0:
-				Lineage.make_captain(world, founder, NameGen.captain_name_base(world.rng))
-			stacks.captain_unit[new_stack] = founder
-			var founder_name: String = units.names.get(founder, "Unit %d" % founder)
-			world.log_event("%s founds %s" % [founder_name, _fname(world, g)])
-		else:
+			if g != -1:
+				did_found = true
+				var center := world.map.center_of(ruin.x, ruin.y)
+				var new_stack := stacks.add(g, center.x, center.y, NameGen.stack_name(world.rng))
+				for u2 in fled_list:
+					units.faction[u2] = g
+					units.stack[u2] = new_stack
+				if units.is_captain[founder] == 0:
+					Lineage.make_captain(world, founder, NameGen.captain_name_base(world.rng))
+				stacks.captain_unit[new_stack] = founder
+				var founder_name: String = units.names.get(founder, "Unit %d" % founder)
+				world.log_event("%s founds %s" % [founder_name, _fname(world, g)])
+
+		if not did_found:
 			for u2 in fled_list:
 				units.faction[u2] = winner_world
 				units.stack[u2] = winner_stack
@@ -310,14 +314,15 @@ static func finish(inst: BattleInstance, world: World) -> Dictionary:
 	var dead_count := 0
 	var stack_survivors := {}     # stack id -> surviving-marble count (this battle)
 	var fled_survivors := {}      # stack id -> Array[unit id] that fled this battle
+	var kills_gain := {}          # home stack id -> int kill delta this battle (M9, §17.3 Economy.loot)
 	for i in range(state.n):
 		var u: int = inst.unit_of[i]
+		var home_stack: int = units.stack[u]
+		kills_gain[home_stack] = int(kills_gain.get(home_stack, 0)) + (state.kills[i] - units.kills[u])
 		units.xp[u] = state.xp[i]
 		units.kills[u] = state.kills[i]
 		units.rank[u] = state.rank[i]
-		Lineage.check_legend(world, u)
 		var truly_dead: bool = state.state[i] == BattleState.State.DEAD and state.fled[i] == 0
-		var home_stack: int = units.stack[u]
 		if truly_dead:
 			dead_count += 1
 			units.kill(u)
@@ -330,6 +335,13 @@ static func finish(inst: BattleInstance, world: World) -> Dictionary:
 				fled_survivors[home_stack].append(u)
 
 	stacks.recount(units)
+
+	# Hero promotion (§17.4/§17.8, M9): marbles ascending, alive unit ->
+	# check_promote; slew_leader = true when it's in this battle's slayers.
+	for i in range(state.n):
+		var pu: int = inst.unit_of[i]
+		if units.alive[pu] == 1:
+			Heroes.check_promote(world, pu, inst.slayers.has(pu))
 
 	var local_winner: int = inst.sim.winner(state)
 	var winner_side: int = local_winner if local_winner >= 0 else -1
@@ -361,6 +373,8 @@ static func finish(inst: BattleInstance, world: World) -> Dictionary:
 	if winner_world != -1:
 		Kingdoms.on_event(world, "win", winner_world)
 	var retreated_factions := {}
+	var winner_stacks: Array = []
+	var loser_stacks: Array = []
 
 	for stack in inst.stack_ids:
 		var wf: int = stacks.faction[stack]
@@ -368,11 +382,13 @@ static func finish(inst: BattleInstance, world: World) -> Dictionary:
 
 		var is_winner: bool = winner_side != -1 and e == winner_side
 		if is_winner:
+			winner_stacks.append(stack)
 			if winner_name == "":
 				winner_name = stacks.names[stack]
 			stacks.state[stack] = Stacks.State.IDLE
 			stacks.idle_timer[stack] = Tuning.IDLE_AFTER_BATTLE
 		else:
+			loser_stacks.append(stack)
 			if loser_name == "":
 				loser_name = stacks.names[stack]
 			if not retreated_factions.has(wf):
@@ -393,6 +409,9 @@ static func finish(inst: BattleInstance, world: World) -> Dictionary:
 
 		if stacks.count[stack] == 0:
 			stacks.alive[stack] = 0
+
+	if winner_side != -1:
+		Economy.loot(world, winner_stacks, loser_stacks, kills_gain)
 
 	world.scars.append([inst.tile.x, inst.tile.y, dead_count, world.time])
 

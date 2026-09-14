@@ -40,7 +40,7 @@ static func goal_weights(w: World, f: int) -> PackedFloat32Array:
 	# no alive other faction -> 0 extra.
 	var min_rel := INF
 	var found_other := false
-	for g in range(Tuning.MAX_FACTIONS_WORLD):
+	for g in range(w.faction_count):
 		if g == f:
 			continue
 		if w.faction_alive[g] == 0:
@@ -75,6 +75,15 @@ static func recruit_weapon(w: World, f: int, rng: RandomNumberGenerator) -> int:
 
 static func plinko_bias(w: World, f: int) -> float:
 	return (w.ktrait(f, 2) - 0.5) * Tuning.PLINKO_BIAS_GREED
+
+
+## Slot recycling: returns true if some `f < faction_count` with
+## `faction_alive == 0`, or `faction_count < MAX_FACTIONS_WORLD`.
+static func has_free_slot(w: World) -> bool:
+	for f in range(w.faction_count):
+		if w.faction_alive[f] == 0:
+			return true
+	return w.faction_count < Tuning.MAX_FACTIONS_WORLD
 
 
 ## Copy of `order` with the favoured slot moved to index 4 (CHARGER ->
@@ -119,12 +128,12 @@ static func tick(w: World, dt: float) -> void:
 	if w.borders_version != w.border_adj_version:
 		_rebuild_border_adj(w)
 
-	for a in range(Tuning.MAX_FACTIONS_WORLD):
+	for a in range(w.faction_count):
 		if w.faction_alive[a] == 0:
 			continue
 		if w.ktrait(a, 1) <= 0.6:
 			continue
-		for b in range(a + 1, Tuning.MAX_FACTIONS_WORLD):
+		for b in range(a + 1, w.faction_count):
 			if w.faction_alive[b] == 0:
 				continue
 			if w.border_adj[a * Tuning.MAX_FACTIONS_WORLD + b] == 0:
@@ -190,21 +199,49 @@ static func on_battle_finished(w: World, inst: BattleInstance, result: Dictionar
 			w.add_relation(victim_f, killer_f, Tuning.REL_CAPTAIN_KILLED)
 
 
-## Shared new-faction bookkeeping (m5-hookup fork tag): faction slot, colour,
-## name, ktraits (copied from `from_f` with cohesion reset to KTRAIT_INIT),
-## plinko profile. Used by check_split and BattleBridge's rebirth mechanic
-## (docs/ARCHITECTURE.md §13.4 last bullet). Returns the new faction id.
+## Slot recycling §17.6: faction slot, colour, name, ktraits (copied from
+## `from_f` with cohesion reset to KTRAIT_INIT), relations reset, split_cooldown
+## reset, plinko profile. Used by check_split and BattleBridge's rebirth
+## mechanic (docs/ARCHITECTURE.md §13.4 last bullet). Returns the new faction
+## id, or -1 if no free slot and MAX_FACTIONS_WORLD reached.
 static func new_faction(w: World, from_f: int) -> int:
-	var g := w.faction_count
-	w.faction_count += 1
+	# Find lowest dead slot or append.
+	var g := -1
+	for f in range(w.faction_count):
+		if w.faction_alive[f] == 0:
+			g = f
+			break
+	if g == -1:
+		if w.faction_count >= Tuning.MAX_FACTIONS_WORLD:
+			return -1
+		g = w.faction_count
+		w.faction_count += 1
 
-	w.faction_color[g] = g % 8
+	w.faction_color[g] = g % Tuning.FACTION_COLORS.size()
 	w.faction_alive[g] = 1
-	w.faction_names.append(NameGen.kingdom_name(w.rng))
 
+	# name drawn first (affects plinko rng draw order)
+	var name := NameGen.kingdom_name(w.rng)
+	if w.faction_names.size() <= g:
+		var old_size := w.faction_names.size()
+		w.faction_names.resize(g + 1)
+		for i in range(old_size, g + 1):
+			w.faction_names[i] = ""
+	w.faction_names[g] = name
+
+	# copy ktraits from from_f, reset cohesion
 	for k in range(5):
 		w.ktraits[g * 5 + k] = w.ktraits[from_f * 5 + k]
 	w.ktraits[g * 5 + 4] = Tuning.KTRAIT_INIT
+
+	# reset relations to 0
+	var M := Tuning.MAX_FACTIONS_WORLD
+	for b in range(M):
+		w.relations[g * M + b] = 0.0
+		w.relations[b * M + g] = 0.0
+
+	# reset split cooldown
+	w.split_cooldown[g] = 0.0
 
 	# order = identity shuffled with w.rng
 	var order := PackedInt32Array()
@@ -239,7 +276,7 @@ static func check_split(w: World) -> void:
 			continue
 		if w.split_cooldown[f] > 0.0:
 			continue
-		if w.faction_count >= Tuning.MAX_FACTIONS_WORLD:
+		if not has_free_slot(w):
 			continue
 		if w.ktrait(f, 4) >= Tuning.SPLIT_COHESION:
 			continue

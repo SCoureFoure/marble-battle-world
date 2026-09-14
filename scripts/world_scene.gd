@@ -18,6 +18,10 @@ var timeline_panel: TimelinePanel
 var time_controls: HBoxContainer
 var camera: Camera2D
 var hud: Label
+var follow_label: Label
+
+var followed_unit: int = -1
+var followed_stack: int = -1
 
 var steps_per_frame: int = 1
 var paused: bool = false
@@ -39,6 +43,7 @@ var _drag_button: int = -1
 
 func _ready() -> void:
 	var seed_val := 1
+	var follow_arg := false
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--seed="):
 			seed_val = int(arg.substr(7))
@@ -48,8 +53,13 @@ func _ready() -> void:
 			capture_tick = int(arg.substr(15))
 		elif arg.begins_with("--capture-battle="):
 			capture_battle = int(arg.substr(17)) == 1
+		elif arg.begins_with("--follow="):
+			follow_arg = int(arg.substr(9)) == 1
 
 	world = World.create(seed_val)
+
+	if follow_arg:
+		_start_capture_follow()
 
 	map_layer = MapLayer.new()
 	map_layer.name = "MapLayer"
@@ -110,6 +120,13 @@ func _ready() -> void:
 	add_child(layer)
 	layer.add_child(hud)
 
+	follow_label = Label.new()
+	follow_label.name = "FollowLabel"
+	follow_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	follow_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	follow_label.visible = followed_unit != -1
+	layer.add_child(follow_label)
+
 	_build_time_controls()
 
 
@@ -154,6 +171,21 @@ func _build_time_controls() -> void:
 	time_controls.position = Vector2(size.x / 2.0 - 150.0, size.y - 40.0)
 
 
+## `--follow=1`: follow the captain of the last stack (highest id) whose
+## captain has `hero == 1` (a free company); none if no such stack.
+func _start_capture_follow() -> void:
+	var target_stack := -1
+	var target_unit := -1
+	for i in range(world.stacks.n):
+		var cap: int = world.stacks.captain_unit[i]
+		if cap >= 0 and world.units.hero[cap] == 1:
+			target_stack = i
+			target_unit = cap
+	if target_stack != -1:
+		followed_unit = target_unit
+		followed_stack = target_stack
+
+
 func _toggle_pause() -> void:
 	paused = not paused
 
@@ -196,6 +228,23 @@ func _process(delta: float) -> void:
 				WorldSim.step(world, Tuning.DT)
 	world_ms = (Time.get_ticks_usec() - t0) / 1000.0
 	ticks += 1
+	battle_view.paused = paused
+
+	if followed_unit != -1:
+		var r := Follow.step(world, followed_unit, followed_stack)
+		if r[2] != "":
+			world.log_event(r[2])
+		followed_unit = r[0]
+		followed_stack = r[1]
+		if followed_unit != -1 and followed_stack >= 0:
+			camera.position = Vector2(world.stacks.x[followed_stack], world.stacks.y[followed_stack])
+			spectate_panel.show_stack(followed_stack)
+	follow_label.visible = followed_unit != -1
+	if followed_unit != -1:
+		follow_label.text = "Following: %s — %s" % [
+			world.units.names.get(followed_unit, "Unit %d" % followed_unit),
+			world.stacks.label(followed_stack),
+		]
 
 	if capture_path != "" and ticks == capture_tick:
 		if capture_battle and not battle_view.visible and world.battles.size() > 0:
@@ -257,6 +306,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				KEY_F9:
 					_try_load()
 					return
+				KEY_F:
+					_toggle_follow()
+					return
 
 	if battle_view.visible:
 		return
@@ -281,6 +333,19 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _dragging:
 			var mm := event as InputEventMouseMotion
 			camera.position -= mm.relative / camera.zoom.x
+
+
+## `F`: following -> stop; else if the spectate panel shows a stack with a
+## live captain -> start following that captain.
+func _toggle_follow() -> void:
+	if followed_unit != -1:
+		followed_unit = -1
+		followed_stack = -1
+		return
+	var s := spectate_panel.shown_stack
+	if s >= 0 and world.stacks.captain_unit[s] >= 0:
+		followed_unit = world.stacks.captain_unit[s]
+		followed_stack = s
 
 
 ## Nearest alive stack to the click, within STACK_RADIUS * 2 / zoom world

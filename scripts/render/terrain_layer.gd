@@ -4,6 +4,7 @@ extends Node2D
 ## .warboss-horde/slices/m2-renderer.md §3.
 
 var grid: TerrainGrid
+var palette: PackedInt32Array = PackedInt32Array()  # see BattleRenderer.faction_color
 
 
 func _draw() -> void:
@@ -32,7 +33,7 @@ func _draw() -> void:
 			TerrainGrid.Kind.TOWER:
 				draw_rect(rect, Color(0.35, 0.30, 0.40))
 				var owner: int = grid.owner[c]
-				var oc: Color = Tuning.FACTION_COLORS[owner % 8] if owner >= 0 else Color(0.6, 0.6, 0.6)
+				var oc: Color = BattleRenderer.faction_color(owner, palette) if owner >= 0 else Color(0.6, 0.6, 0.6)
 				var inner := Rect2(center - Vector2(grid.cell, grid.cell) * 0.25, Vector2(grid.cell, grid.cell) * 0.5)
 				draw_rect(inner, oc)
 			TerrainGrid.Kind.FIRE:

@@ -24,6 +24,7 @@ var side_factions: Array            # per local faction index (0..3): a
 var lod_xp_acc: PackedFloat32Array  # BattleLod xp-credit accumulator, one
                                      # float per marble; grown to state.n by
                                      # BattleLod.step (M6, §14.2)
+var slayers: PackedInt32Array       # unit ids that killed a captain or hero this battle (M9)
 
 
 func _init(id_: int, tile_: Vector2i) -> void:
@@ -41,3 +42,4 @@ func _init(id_: int, tile_: Vector2i) -> void:
 	captain_killers = []
 	side_factions = [PackedInt32Array(), PackedInt32Array(), PackedInt32Array(), PackedInt32Array()]
 	lod_xp_acc = PackedFloat32Array()
+	slayers = PackedInt32Array()

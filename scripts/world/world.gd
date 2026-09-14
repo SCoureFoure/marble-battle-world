@@ -10,6 +10,8 @@ var town_state: PackedInt32Array    # 0 INTACT, 1 RAIDED, 2 RAZED
 var town_pop: PackedFloat32Array
 var town_recruit: PackedFloat32Array
 var town_timer: PackedFloat32Array
+var town_gold: PackedFloat32Array   # 0.0 (M9)
+var town_lord: PackedInt32Array     # -1 (M9)
 var units: Units
 var stacks: Stacks
 var pathing: Pathing
@@ -28,13 +30,14 @@ var borders_version: int = 0
 var ktraits: PackedFloat32Array     # size MAX_FACTIONS_WORLD*5; index f*5+k (M5)
 var relations: PackedFloat32Array   # size MAX_FACTIONS_WORLD^2; index a*MAX_FACTIONS_WORLD+b (M5)
 var faction_alive: PackedByteArray  # 1 while the faction has towns or stacks (M5)
-var faction_color: PackedInt32Array # index into Tuning.FACTION_COLORS, f % 8 at creation (M5)
+var faction_color: PackedInt32Array # index into Tuning.FACTION_COLORS, f % FACTION_COLORS.size() at creation (M5)
 var faction_names: Array            # String per faction, NameGen.kingdom_name (M5)
 var border_adj: PackedByteArray     # size MAX_FACTIONS_WORLD^2 adjacency cache (M5)
 var border_adj_version: int = -1    # borders_version this cache was built from (M5)
 var split_cooldown: PackedFloat32Array # per faction, seconds until check_split may split again (M5)
 var meta_timer: float = 0.0         # accumulator: Kingdoms.check_split/check_death once per world second (M5)
 var watched_battle: int = -1        # BattleInstance.id being watched full-sim, -1 none (M6)
+var history: Dictionary = {}        # int counters; keys: "promotions", "breakaways", "defections", "foundings", "retirements", "restocks" (M9)
 
 # Clockwise from north: N, NE, E, SE, S, SW, W, NW.
 const NEIGHBOR_DIRS := [
@@ -52,6 +55,8 @@ func _init() -> void:
 	town_pop = PackedFloat32Array()
 	town_recruit = PackedFloat32Array()
 	town_timer = PackedFloat32Array()
+	town_gold = PackedFloat32Array()
+	town_lord = PackedInt32Array()
 	units = null
 	stacks = null
 	pathing = null
@@ -74,6 +79,7 @@ func _init() -> void:
 	border_adj = PackedByteArray()
 	border_adj_version = -1
 	split_cooldown = PackedFloat32Array()
+	history = {}
 
 
 func setup_blank(cols: int, rows: int, seed: int) -> void:
@@ -85,6 +91,8 @@ func setup_blank(cols: int, rows: int, seed: int) -> void:
 	town_pop = PackedFloat32Array()
 	town_recruit = PackedFloat32Array()
 	town_timer = PackedFloat32Array()
+	town_gold = PackedFloat32Array()
+	town_lord = PackedInt32Array()
 	units = Units.new(2048)
 	stacks = Stacks.new(64)
 	pathing = Pathing.new(map)
@@ -96,6 +104,7 @@ func setup_blank(cols: int, rows: int, seed: int) -> void:
 	time = 0.0
 	faction_count = 0
 	reinforce = {}
+	history = {"promotions": 0, "breakaways": 0, "defections": 0, "foundings": 0, "retirements": 0, "restocks": 0}
 
 	# fiat: setup_blank seeds each faction's plinko order as the identity
 	# permutation (no rng draw), unlike create() which shuffles.
@@ -124,7 +133,7 @@ func setup_blank(cols: int, rows: int, seed: int) -> void:
 	faction_color = PackedInt32Array()
 	faction_color.resize(Tuning.MAX_FACTIONS_WORLD)
 	for f in range(Tuning.MAX_FACTIONS_WORLD):
-		faction_color[f] = f % 8
+		faction_color[f] = f % Tuning.FACTION_COLORS.size()
 	faction_names = []
 
 	border_adj = PackedByteArray()
@@ -151,21 +160,36 @@ static func create(seed: int) -> World:
 
 	# Map generation first: WorldGen draws from map.rng (seeded `seed`).
 	w.map = WorldMap.new(Tuning.WORLD_COLS, Tuning.WORLD_ROWS, seed)
-	var town_tiles: Array = WorldGen.generate(w.map)
+
+	# fiat: population counts (kingdoms, companies, town count) are drawn
+	# from a dedicated rng seeded seed + 2, kept separate from map.rng and
+	# w.rng so map layout and unit/stack draws are unaffected by it.
+	var pop := RandomNumberGenerator.new()
+	pop.seed = seed + 2
+	var kingdoms := pop.randi_range(Tuning.KINGDOMS_MIN, Tuning.KINGDOMS_MAX)
+	var companies := pop.randi_range(Tuning.COMPANIES_MIN, Tuning.COMPANIES_MAX)
+	var n_towns := pop.randi_range(maxi(Tuning.TOWNS_MIN, kingdoms), Tuning.TOWNS_MAX)
+	companies = mini(companies, Tuning.MAX_FACTIONS_WORLD - kingdoms)
+
+	var town_tiles: Array = WorldGen.generate(w.map, n_towns)
+	kingdoms = mini(kingdoms, town_tiles.size())
 
 	# add_town so create() and hand-built worlds share one path (fiat, §12.1).
 	for ti in range(town_tiles.size()):
 		var t: Vector2i = town_tiles[ti]
-		var owner := ti if ti < Tuning.N_FACTIONS else -1
+		var owner := ti if ti < kingdoms else -1
 		w.add_town(t, owner)
 
-	w.faction_count = Tuning.N_FACTIONS
+	w.faction_count = kingdoms + companies
 	w.units = Units.new(16384)
 	w.stacks = Stacks.new(512)
+	# fiat: pathing must exist before the company placement loop, which
+	# probes reachability from candidate tiles; nothing in pathing draws rng.
 	w.pathing = Pathing.new(w.map)
 	w.battles = []
 	w.next_battle_id = 0
 	w.scars = []
+	w.history = {"promotions": 0, "breakaways": 0, "defections": 0, "foundings": 0, "retirements": 0, "restocks": 0}
 	w.time = 0.0
 	w.reinforce = {}
 
@@ -174,7 +198,7 @@ static func create(seed: int) -> World:
 	w.rng = RandomNumberGenerator.new()
 	w.rng.seed = seed + 1
 
-	for fi in range(Tuning.N_FACTIONS):
+	for fi in range(kingdoms):
 		var capital_tile: Vector2i = town_tiles[fi]
 		var neighbours := _passable_neighbours(w.map, capital_tile)
 
@@ -190,6 +214,7 @@ static func create(seed: int) -> World:
 			var pos := w.map.center_of(tile.x, tile.y)
 			var stack_name := NameGen.stack_name(w.rng)
 			var stack_id := w.stacks.add(fi, pos.x, pos.y, stack_name)
+			w.stacks.gold[stack_id] = Tuning.KINGDOM_STACK_GOLD
 
 			var unit_count := w.rng.randi_range(Tuning.STACK_UNITS_MIN, Tuning.STACK_UNITS_MAX)
 			for _u in range(unit_count):
@@ -198,15 +223,61 @@ static func create(seed: int) -> World:
 
 			var captain_id := w.units.add(fi, 1, 1, true, stack_id)
 			Lineage.make_captain(w, captain_id, NameGen.captain_name_base(w.rng))
+			w.units.career_start[captain_id] = -w.rng.randf() * Tuning.HERO_LIFESPAN * Tuning.START_AGE_SPREAD
 			w.stacks.captain_unit[stack_id] = captain_id
 			w.stacks.count[stack_id] = unit_count + 1
 
+	# Free companies: one per remaining faction slot, placed away from towns.
+	for ci in range(companies):
+		var cf := kingdoms + ci
+		var ctile := Vector2i(-1, -1)
+		for _try in range(200):
+			var tx := w.rng.randi_range(0, w.map.cols - 1)
+			var ty := w.rng.randi_range(0, w.map.rows - 1)
+			if w.map.kind[w.map.idx(tx, ty)] != WorldMap.Kind.PLAINS:
+				continue
+			var far_enough := true
+			for twn_i in range(town_tiles.size()):
+				var tt: Vector2i = town_tiles[twn_i]
+				if maxi(absi(tx - tt.x), absi(ty - tt.y)) < Tuning.COMPANY_SPAWN_MIN_DIST:
+					far_enough = false
+					break
+			if not far_enough:
+				continue
+			var candidate := Vector2i(tx, ty)
+			if w.pathing.find(candidate, town_tiles[0]).size() > 0:
+				ctile = candidate
+				break
+
+		if ctile == Vector2i(-1, -1):
+			var fallback_town: Vector2i = town_tiles[ci % town_tiles.size()]
+			var fallback_neighbours := _passable_neighbours(w.map, fallback_town)
+			ctile = fallback_neighbours[0] if fallback_neighbours.size() > 0 else fallback_town
+
+		var cpos := w.map.center_of(ctile.x, ctile.y)
+		var cstack_name := NameGen.stack_name(w.rng)
+		var cstack_id := w.stacks.add(cf, cpos.x, cpos.y, cstack_name)
+
+		var cunit_count := w.rng.randi_range(Tuning.COMPANY_UNITS_MIN, Tuning.COMPANY_UNITS_MAX)
+		for _u in range(cunit_count):
+			var cweapon := w.rng.randi_range(0, 4)
+			w.units.add(cf, 0, cweapon, false, cstack_id)
+
+		var ccaptain_id := w.units.add(cf, 1, 1, true, cstack_id)
+		Lineage.make_captain(w, ccaptain_id, NameGen.captain_name_base(w.rng))
+		w.units.hero[ccaptain_id] = 1
+		w.units.ambition[ccaptain_id] = w.rng.randf()
+		w.units.career_start[ccaptain_id] = -w.rng.randf() * Tuning.HERO_LIFESPAN * Tuning.START_AGE_SPREAD
+		w.stacks.captain_unit[cstack_id] = ccaptain_id
+		w.stacks.gold[cstack_id] = Tuning.COMPANY_START_GOLD
+		w.stacks.count[cstack_id] = cunit_count + 1
+
 	# fiat: per-faction plinko profile, shuffled from world.rng after stacks
-	# so stack-building draws stay stable regardless of plinko changes.
+	# and companies so those draws stay stable regardless of plinko changes.
 	w.plinko_rows = PackedInt32Array()
 	w.plinko_bias = PackedFloat32Array()
 	w.plinko_order = []
-	for _f in range(Tuning.N_FACTIONS):
+	for _f in range(w.faction_count):
 		w.plinko_rows.append(7)
 		w.plinko_bias.append(0.0)
 		var order := PackedInt32Array()
@@ -235,7 +306,7 @@ static func create(seed: int) -> World:
 	w.faction_color = PackedInt32Array()
 	w.faction_color.resize(Tuning.MAX_FACTIONS_WORLD)
 	for f in range(Tuning.MAX_FACTIONS_WORLD):
-		w.faction_color[f] = f % 8
+		w.faction_color[f] = f % Tuning.FACTION_COLORS.size()
 	w.faction_names = []
 	for _f in range(w.faction_count):
 		w.faction_names.append(NameGen.kingdom_name(w.rng))
@@ -318,12 +389,14 @@ func add_town(tile: Vector2i, owner: int) -> int:
 	town_pop.append(Tuning.TOWN_POP_START)
 	town_recruit.append(0.0)
 	town_timer.append(0.0)
+	town_gold.append(0.0)
+	town_lord.append(-1)
 	map.kind[map.idx(tile.x, tile.y)] = WorldMap.Kind.TOWN
 	return id
 
 
-## Resizes town_state/town_pop/town_recruit/town_timer up to towns.size(),
-## filling new entries with 0 / TOWN_POP_START / 0.0 / 0.0. Never shrinks,
+## Resizes town_state/town_pop/town_recruit/town_timer/town_gold/town_lord up to towns.size(),
+## filling new entries with 0 / TOWN_POP_START / 0.0 / 0.0 / 0.0 / -1. Never shrinks,
 ## never overwrites existing entries. Covers callers (e.g. tests) that
 ## append to towns/town_owner directly without going through add_town.
 func sync_town_arrays() -> void:
@@ -348,6 +421,20 @@ func sync_town_arrays() -> void:
 		town_timer.resize(n)
 		for i in range(old, n):
 			town_timer[i] = 0.0
+	if town_gold.size() < n:
+		var old := town_gold.size()
+		town_gold.resize(n)
+		for i in range(old, n):
+			town_gold[i] = 0.0
+	if town_lord.size() < n:
+		var old := town_lord.size()
+		town_lord.resize(n)
+		for i in range(old, n):
+			town_lord[i] = -1
+
+
+func bump(key: String) -> void:
+	history[key] = int(history.get(key, 0)) + 1
 
 
 func recompute_borders() -> void:

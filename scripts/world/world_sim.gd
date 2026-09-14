@@ -15,8 +15,11 @@ static func step_world(w: World, dt: float) -> void:
 			st.immunity[i] -= dt
 		if st.idle_timer[i] > 0.0:
 			st.idle_timer[i] -= dt
+		if st.rally_cd[i] > 0.0:
+			st.rally_cd[i] -= dt
 
 	TownSim.step(w, dt)
+	Economy.accrue(w, dt)
 	Kingdoms.tick(w, dt)
 
 	w.meta_timer += dt
@@ -24,9 +27,13 @@ static func step_world(w: World, dt: float) -> void:
 		w.meta_timer -= 1.0
 		Kingdoms.check_split(w)
 		Kingdoms.check_death(w)
+		Heroes.check_breakaway(w)
+		Settling.check_aging(w)
 
 	for i in range(st.n):
 		if st.alive[i] == 0:
+			continue
+		if st.goal[i] == Stacks.Goal.FOUND:
 			continue
 		if st.state[i] == Stacks.State.IDLE and st.idle_timer[i] <= 0.0 and st.ai_timer[i] <= 0.0:
 			pick_goal(w, i)
@@ -48,7 +55,8 @@ static func step(w: World, dt: float) -> void:
 static func pick_goal(w: World, i: int) -> void:
 	var st := w.stacks
 	var fi := st.faction[i]
-	var weights: PackedFloat32Array = Kingdoms.goal_weights(w, fi)
+	var weights: PackedFloat32Array = Economy.goal_bonus(w, i, Kingdoms.goal_weights(w, fi))
+	weights.append(Rally.goal_weight(w, i))   # index Stacks.Goal.RALLY (§19)
 	var total := 0.0
 	for wgt in weights:
 		total += wgt
@@ -115,6 +123,30 @@ static func set_goal(w: World, i: int, goal: int) -> bool:
 			if enemy_stack == -1:
 				return false
 			target_tile = w.stack_tile(enemy_stack)
+		Stacks.Goal.RESTOCK:
+			var t := Economy.restock_target(w, i)
+			if t == -1:
+				return false
+			var town_tile := Vector2i(int(w.towns[t].x), int(w.towns[t].y))
+			if w.stack_tile(i) == town_tile:
+				Economy.restock(w, i, t)
+				st.goal[i] = Stacks.Goal.IDLE_HEAL
+				st.state[i] = Stacks.State.IDLE
+				return true
+			target_tile = town_tile
+		Stacks.Goal.FOUND:
+			return false
+		Stacks.Goal.RALLY:
+			var host := Rally.best_host(w, i)
+			if host == -1:
+				return false
+			st.rally_target[i] = host
+			target_tile = w.stack_tile(host)
+			var here := w.stack_tile(i)
+			if maxi(absi(target_tile.x - here.x), absi(target_tile.y - here.y)) <= 1:
+				st.goal[i] = Stacks.Goal.RALLY
+				Rally.arrive(w, i)
+				return true
 		_:
 			return false
 
@@ -154,7 +186,7 @@ static func _nearest_holy_tile(w: World, x: float, y: float) -> Vector2i:
 static func _most_hated_faction(w: World, f: int) -> int:
 	var best := -1
 	var best_rel := INF
-	for g in range(Tuning.MAX_FACTIONS_WORLD):
+	for g in range(w.faction_count):
 		if g == f or w.faction_alive[g] == 0:
 			continue
 		var r := w.relation(f, g)
@@ -196,9 +228,8 @@ static func move_stacks(w: World, dt: float) -> void:
 
 		var p: PackedVector2Array = st.path[i]
 		if st.path_i[i] >= p.size():
-			if st.goal[i] == Stacks.Goal.PILGRIMAGE:
-				Kingdoms.on_event(w, "pilgrim", st.faction[i])
 			st.state[i] = Stacks.State.IDLE
+			_on_arrive(w, i)
 			continue
 
 		var target: Vector2 = p[st.path_i[i]]
@@ -217,13 +248,36 @@ static func move_stacks(w: World, dt: float) -> void:
 			st.y[i] = target.y
 			st.path_i[i] += 1
 			if st.path_i[i] >= p.size():
-				if st.goal[i] == Stacks.Goal.PILGRIMAGE:
-					Kingdoms.on_event(w, "pilgrim", st.faction[i])
 				st.state[i] = Stacks.State.IDLE
+				_on_arrive(w, i)
 		else:
 			var dir := to_target / dist
 			st.x[i] += dir.x * speed * dt
 			st.y[i] += dir.y * speed * dt
+
+
+## Path-end handling for a stack that just went MOVING/RETREATING -> IDLE
+## (both move_stacks arrival sites). PILGRIMAGE: pilgrim kingdom-trait event
+## (unchanged). RESTOCK: restock at the town under the stack, if any, then
+## fall back to IDLE_HEAL. FOUND: found a town when the stack is exactly on
+## its goal tile.
+static func _on_arrive(w: World, i: int) -> void:
+	var st := w.stacks
+	match st.goal[i]:
+		Stacks.Goal.PILGRIMAGE:
+			Kingdoms.on_event(w, "pilgrim", st.faction[i])
+		Stacks.Goal.RESTOCK:
+			var tile := w.stack_tile(i)
+			var t := w.town_at(tile)
+			if t != -1:
+				Economy.restock(w, i, t)
+				st.goal[i] = Stacks.Goal.IDLE_HEAL
+		Stacks.Goal.RALLY:
+			Rally.arrive(w, i)
+		Stacks.Goal.FOUND:
+			var tile2 := w.stack_tile(i)
+			if tile2 == Vector2i(st.goal_tx[i], st.goal_ty[i]):
+				Settling.found_town(w, i, tile2)
 
 
 static func check_collisions(w: World) -> void:
@@ -337,24 +391,31 @@ static func reinforce(w: World) -> void:
 
 static func step_battles(w: World) -> void:
 	var remaining: Array = []
-	for battle in w.battles:
+	# Iterate a copy: BattleBridge.finish erases the finished instance from
+	# w.battles, and erasing from the array being iterated skips the next
+	# battle, which then vanishes with its stacks stuck in BATTLE forever.
+	for battle in w.battles.duplicate():
 		var inst: BattleInstance = battle
 		if inst.id == w.watched_battle:
 			inst.sim.step(inst.state, Tuning.DT)
 		else:
 			BattleLod.step(inst, Tuning.DT)
 
-		# Captain kills (§13.4: BattleInstance.captain_killers, relations).
+		# Captain kills (§13.4: BattleInstance.captain_killers, relations) and
+		# captain/hero slayers (§17.8, M9: BattleInstance.slayers).
 		for ev in inst.state.events:
-			if ev[0] != BattleState.Event.CAPTAIN_DEAD:
-				continue
-			var actor: int = ev[1]
-			var target: int = ev[2]
-			if actor == -1:
-				continue
-			var victim_f: int = inst.faction_map[inst.state.faction_id[target]]
-			var killer_f: int = inst.faction_map[inst.state.faction_id[actor]]
-			inst.captain_killers.append([victim_f, killer_f])
+			if ev[0] == BattleState.Event.CAPTAIN_DEAD:
+				var actor: int = ev[1]
+				var target: int = ev[2]
+				if actor == -1:
+					continue
+				var victim_f: int = inst.faction_map[inst.state.faction_id[target]]
+				var killer_f: int = inst.faction_map[inst.state.faction_id[actor]]
+				inst.captain_killers.append([victim_f, killer_f])
+			elif ev[0] == BattleState.Event.KILL and ev[1] != -1:
+				var vu: int = inst.unit_of[ev[2]]
+				if w.units.is_captain[vu] == 1 or w.units.hero[vu] == 1:
+					inst.slayers.append(inst.unit_of[ev[1]])
 
 		var win := inst.sim.winner(inst.state)
 		if win != -1:

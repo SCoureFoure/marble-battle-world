@@ -5,54 +5,117 @@ const TestKit = preload("res://scripts/tests/test_kit.gd")
 func _init() -> void:
 	var t := TestKit.new()
 
-	# Case 1: World.create(42) — shape, counts, captains, passability.
+	# Case 1: World.create(42) — mirror the population rng (seed + 2) and
+	# check the shape it should have produced.
 	var w := World.create(42)
-	t.check(w.faction_count == 6, "faction_count == 6")
-	t.check(w.towns.size() == 24, "towns.size() == 24")
+	var p := RandomNumberGenerator.new()
+	p.seed = 44
+	var k := p.randi_range(Tuning.KINGDOMS_MIN, Tuning.KINGDOMS_MAX)
+	var c := p.randi_range(Tuning.COMPANIES_MIN, Tuning.COMPANIES_MAX)
+	var nt := p.randi_range(maxi(Tuning.TOWNS_MIN, k), Tuning.TOWNS_MAX)
 
-	var owners_ok := true
-	for f in range(6):
-		if w.town_owner[f] != f:
-			owners_ok = false
-	t.check(owners_ok, "town_owner[0..5] == 0..5")
-	t.check(w.town_owner[6] == -1, "town_owner[6] == -1")
+	t.check(w.towns.size() <= nt, "towns.size() <= nt")
+	t.check(w.towns.size() >= k, "towns.size() >= k")
 
-	t.check(w.stacks.n == 18, "stacks.n == 18")
+	var owned := 0
+	for ti in range(w.towns.size()):
+		if w.town_owner[ti] >= 0:
+			owned += 1
+	t.check(owned == k, "owned towns count == k")
+	t.check(w.faction_count == k + c, "faction_count == k + c")
+	t.check(w.stacks.n == k * Tuning.STACKS_PER_FACTION + c, "stacks.n == k*STACKS_PER_FACTION + c")
 
-	var all_alive := true
-	var counts_ok := true
-	var sum_counts := 0
+	# Case 2: kingdom stacks (i < k*3) vs. company stacks (i >= k*3).
+	var kingdom_stacks_ok := true
+	for i in range(k * Tuning.STACKS_PER_FACTION):
+		if w.stacks.faction[i] >= k:
+			kingdom_stacks_ok = false
+		if not t.approx(w.stacks.gold[i], 40.0):
+			kingdom_stacks_ok = false
+	t.check(kingdom_stacks_ok, "kingdom stacks: faction < k, gold == 40.0")
+
+	var company_stacks_ok := true
+	for i in range(k * Tuning.STACKS_PER_FACTION, w.stacks.n):
+		if w.stacks.faction[i] != k + (i - k * Tuning.STACKS_PER_FACTION):
+			company_stacks_ok = false
+		if not t.approx(w.stacks.gold[i], 80.0):
+			company_stacks_ok = false
+		var cnt := w.stacks.count[i]
+		if cnt < 13 or cnt > 31:
+			company_stacks_ok = false
+		var cap := w.stacks.captain_unit[i]
+		if cap < 0 or w.units.hero[cap] != 1 or w.units.is_captain[cap] != 1:
+			company_stacks_ok = false
+		var tile := w.stack_tile(i)
+		if w.map.kind[w.map.idx(tile.x, tile.y)] == WorldMap.Kind.MOUNTAIN or not w.map.passable(tile.x, tile.y):
+			company_stacks_ok = false
+	t.check(company_stacks_ok, "company stacks: faction, gold, count, captain, tile")
+
+	# Case 3: every captain's career_start in [-450, 0] (-HERO_LIFESPAN * START_AGE_SPREAD).
+	var career_ok := true
 	for si in range(w.stacks.n):
-		if w.stacks.alive[si] == 0:
-			all_alive = false
-		var c := w.stacks.count[si]
-		if c < 61 or c > 121:
-			counts_ok = false
-		sum_counts += c
-	t.check(all_alive, "every stack alive")
-	t.check(counts_ok, "every stack count in [61, 121]")
-	t.check(w.units.n == sum_counts, "units.n == sum of counts")
+		var cap2 := w.stacks.captain_unit[si]
+		if cap2 < 0:
+			career_ok = false
+			continue
+		var cs := w.units.career_start[cap2]
+		if cs < -450.0 or cs > 0.0:
+			career_ok = false
+	t.check(career_ok, "every captain's career_start in [-450, 0]")
 
-	var captains_ok := true
-	for ci in range(w.stacks.n):
-		var cu := w.stacks.captain_unit[ci]
-		if cu < 0 or w.units.is_captain[cu] != 1 or not w.units.names.has(cu):
-			captains_ok = false
-	t.check(captains_ok, "every stack has captain_unit >= 0, is_captain, named")
+	# Case 4: faction_alive / faction_names / plinko_order / faction_color shape.
+	var alive_ok := true
+	for f in range(w.faction_count):
+		if w.faction_alive[f] != 1:
+			alive_ok = false
+	for f in range(w.faction_count, Tuning.MAX_FACTIONS_WORLD):
+		if w.faction_alive[f] != 0:
+			alive_ok = false
+	t.check(alive_ok, "faction_alive == 1 for f < faction_count, 0 for faction_count <= f < 64")
+	t.check(w.faction_names.size() == w.faction_count, "faction_names.size() == faction_count")
+	t.check(w.plinko_order.size() == w.faction_count, "plinko_order.size() == faction_count")
+	var color_ok := true
+	for f in range(Tuning.MAX_FACTIONS_WORLD):
+		if w.faction_color[f] != f % 16:
+			color_ok = false
+	t.check(color_ok, "faction_color[f] == f % 16")
 
-	var tiles_passable := true
-	for ti in range(w.stacks.n):
-		var tile := w.stack_tile(ti)
-		if not w.map.passable(tile.x, tile.y):
-			tiles_passable = false
-	t.check(tiles_passable, "every stack position's tile is passable")
-
-	# Case 2: determinism.
+	# Case 5: determinism.
 	var w1 := World.create(42)
 	var w2 := World.create(42)
 	t.check(w1.units.weapon == w2.units.weapon, "units.weapon arrays equal")
 	t.check(w1.stacks.names == w2.stacks.names, "stacks.names equal")
 	t.check(w1.stacks.x == w2.stacks.x, "stacks.x equal")
+	t.check(w1.faction_count == w2.faction_count, "faction_count equal")
+	t.check(w1.units.n == w2.units.n, "units.n equal")
+	t.check(w1.stacks.y == w2.stacks.y, "stacks.y equal")
+	t.check(w1.towns == w2.towns, "towns equal")
+	t.check(w1.rng.state == w2.rng.state, "rng.state equal")
+
+	# Case 6: spread across seeds 1..12.
+	var spread_ok := true
+	var spread_passable_ok := true
+	for sd in range(1, 13):
+		var ws := World.create(sd)
+		if ws.faction_count < 5 or ws.faction_count > 13:
+			spread_ok = false
+		for si in range(ws.stacks.n):
+			var tile3 := ws.stack_tile(si)
+			if not ws.map.passable(tile3.x, tile3.y):
+				spread_passable_ok = false
+	t.check(spread_ok, "faction_count (k + c) in [5, 13] for seeds 1..12")
+	t.check(spread_passable_ok, "every stack tile passable for seeds 1..12")
+
+	# Case 7: WorldGen.generate town_count parameter.
+	var wm7 := WorldMap.new(96, 54, 5)
+	var towns7: Array = WorldGen.generate(wm7)
+	t.check(towns7.size() <= Tuning.N_FACTIONS * Tuning.TOWNS_PER_FACTION + Tuning.NEUTRAL_TOWNS, "generate() town count <= formula")
+	t.check(towns7.size() >= 20, "generate() town count >= 20")
+
+	var wm8 := WorldMap.new(96, 54, 5)
+	var towns8: Array = WorldGen.generate(wm8, 17)
+	t.check(towns8.size() <= 17, "generate(m, 17).size() <= 17")
+	t.check(towns8.size() >= 15, "generate(m, 17).size() >= 15")
 
 	# Case 3: blank world.
 	var wb := World.new()
@@ -101,10 +164,12 @@ func _init() -> void:
 	t.check(w4.nearest_enemy_stack(1, true) == -1, "nearest_enemy_stack(1, true) == -1")
 	t.check(w4.stack_tile(s2) == Vector2i(9, 6), "stack_tile(s2) == (9,6)")
 
-	# Case 5: World.create(42) — town/plinko fields, borders.
+	# Case 5: World.create(42) — town/plinko fields, borders. Counts derived
+	# from the world itself (population is randomized; only faction 0 is
+	# guaranteed to exist as a kingdom, since KINGDOMS_MIN == 2).
 	var w5 := World.create(42)
 
-	t.check(w5.town_state.size() == 24, "town_state.size() == 24")
+	t.check(w5.town_state.size() == w5.towns.size(), "town_state.size() == towns.size()")
 	var town_state_all_zero := true
 	for st in w5.town_state:
 		if st != 0:
@@ -112,14 +177,14 @@ func _init() -> void:
 	t.check(town_state_all_zero, "town_state all 0")
 	t.check(t.approx(w5.town_pop[0], 50.0), "town_pop[0] approx 50.0")
 
-	t.check(w5.plinko_rows.size() == 6, "plinko_rows.size() == 6")
+	t.check(w5.plinko_rows.size() == w5.faction_count, "plinko_rows.size() == faction_count")
 	var plinko_rows_all_7 := true
 	for pr in w5.plinko_rows:
 		if pr != 7:
 			plinko_rows_all_7 = false
 	t.check(plinko_rows_all_7, "plinko_rows all 7")
 
-	t.check(w5.plinko_order.size() == 6, "plinko_order.size() == 6")
+	t.check(w5.plinko_order.size() == w5.faction_count, "plinko_order.size() == faction_count")
 	var plinko_orders_ok := true
 	for f in range(w5.plinko_order.size()):
 		var order: PackedInt32Array = w5.plinko_order[f]
@@ -132,8 +197,8 @@ func _init() -> void:
 
 	t.check(w5.borders_version >= 1, "borders_version >= 1")
 
-	var capital2_tile := Vector2i(int(w5.towns[2].x), int(w5.towns[2].y))
-	t.check(w5.map.owner[w5.map.idx(capital2_tile.x, capital2_tile.y)] == 2, "map.owner at the capital of faction 2 == 2")
+	var capital2_tile := Vector2i(int(w5.towns[0].x), int(w5.towns[0].y))
+	t.check(w5.map.owner[w5.map.idx(capital2_tile.x, capital2_tile.y)] == 0, "map.owner at the capital of faction 0 == 0")
 
 	var east_tile := capital2_tile + Vector2i(3, 0)
 	if w5.map.in_bounds(east_tile.x, east_tile.y) and w5.map.passable(east_tile.x, east_tile.y):
@@ -148,7 +213,7 @@ func _init() -> void:
 			if d <= Tuning.BORDER_RANGE and d < expected_dist:
 				expected_dist = d
 				expected_owner = owner
-		t.check(w5.map.owner[w5.map.idx(east_tile.x, east_tile.y)] == expected_owner, "map.owner 3 tiles east of capital 2 == 2 unless another owned town is nearer")
+		t.check(w5.map.owner[w5.map.idx(east_tile.x, east_tile.y)] == expected_owner, "map.owner 3 tiles east of capital 0 == 0 unless another owned town is nearer")
 
 	var mountain_i := -1
 	for i in range(w5.map.kind.size()):

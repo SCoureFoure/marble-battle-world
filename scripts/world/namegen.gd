@@ -38,3 +38,7 @@ static func legend_name(rng: RandomNumberGenerator, kills: int) -> String:
 	var a: String = ONSETS[rng.randi_range(0, ONSETS.size() - 1)]
 	var c: String = CODAS[rng.randi_range(0, CODAS.size() - 1)]
 	return "%s %s, killer of %d" % [adj, a.capitalize() + c, kills]
+
+
+static func hero_epithet(rng: RandomNumberGenerator) -> String:
+	return LEGEND_ADJECTIVES[rng.randi_range(0, LEGEND_ADJECTIVES.size() - 1)]

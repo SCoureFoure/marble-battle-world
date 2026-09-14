@@ -17,12 +17,16 @@ const TILE_COLORS := [
 const OVERLAY_ALPHA := 0.28
 const BORDER_DARKEN := Color(0.5, 0.5, 0.5, 1.0)
 const BORDER_WIDTH := 2.0
-const TOWN_SQUARE_SIZE := 10.0
-const TOWN_ROOF_HEIGHT := 6.0
+const TOWN_SQUARE_SIZE := 18.0
+const TOWN_ROOF_HEIGHT := 10.0
 const TOWN_NEUTRAL_COLOR := Color(0.75, 0.7, 0.6)
 const TOWN_RAIDED_COLOR := Color(0.5, 0.5, 0.5)
 const TOWN_RAZED_COLOR := Color(0.0, 0.0, 0.0)
 const TOWN_RAZED_FLAME_COLOR := Color(0.95, 0.5, 0.1)
+const TOWN_OUTLINE_COLOR := Color(0.1, 0.08, 0.06)
+const TOWN_OUTLINE_WIDTH := 2.0
+const FOUNDED_RING_COLOR := Color(1.0, 0.84, 0.0)
+const FOUNDED_RING_WIDTH := 2.0
 
 var world: World
 var _sprite: Sprite2D
@@ -55,6 +59,7 @@ func build(w: World) -> void:
 		_sprite.name = "MapSprite"
 		_sprite.centered = false
 		_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		_sprite.show_behind_parent = true
 		add_child(_sprite)
 
 	_sprite.texture = ImageTexture.create_from_image(img)
@@ -65,6 +70,7 @@ func build(w: World) -> void:
 		_overlay_sprite.name = "OwnerOverlaySprite"
 		_overlay_sprite.centered = false
 		_overlay_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		_overlay_sprite.show_behind_parent = true
 		add_child(_overlay_sprite)
 
 	_overlay_sprite.texture = ImageTexture.create_from_image(_build_overlay_image())
@@ -165,9 +171,11 @@ func _draw() -> void:
 		var t: Vector2 = world.towns[i]
 		var center := world.map.center_of(int(t.x), int(t.y))
 		_draw_town(center, world.town_owner[i], world.town_state[i])
+		if i < world.town_lord.size() and world.town_lord[i] >= 0:
+			draw_arc(center, Tuning.TILE * 0.6, 0.0, TAU, 32, FOUNDED_RING_COLOR, FOUNDED_RING_WIDTH)
 
 
-## House glyph (10x10 square, centred at the tile centre, + a triangle roof
+## House glyph (18x18 square, dark outline, centred at the tile centre, + a triangle roof
 ## above it). INTACT: owner colour (neutral -1: TOWN_NEUTRAL_COLOR). RAIDED:
 ## grey. RAZED: black, plus a small orange flame triangle above the roof.
 func _draw_town(center: Vector2, owner: int, state: int) -> void:
@@ -188,8 +196,11 @@ func _draw_town(center: Vector2, owner: int, state: int) -> void:
 	var roof := PackedVector2Array([sq_rect.position, Vector2(sq_rect.position.x + TOWN_SQUARE_SIZE, sq_rect.position.y), apex])
 	draw_colored_polygon(roof, color)
 
+	draw_rect(sq_rect, TOWN_OUTLINE_COLOR, false, TOWN_OUTLINE_WIDTH)
+	draw_polyline(PackedVector2Array([sq_rect.position, apex, Vector2(sq_rect.position.x + TOWN_SQUARE_SIZE, sq_rect.position.y)]), TOWN_OUTLINE_COLOR, TOWN_OUTLINE_WIDTH)
+
 	if state == 2:
-		var flame_w := 4.0
+		var flame_w := 8.0
 		var flame := PackedVector2Array([
 			apex + Vector2(-flame_w * 0.5, 0.0),
 			apex + Vector2(flame_w * 0.5, 0.0),

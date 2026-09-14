@@ -28,6 +28,9 @@ var _last_tick: int = -1
 # per-marble weapon-hit flash, grown to s.n on demand; decayed to 0 by advance()
 var weapon_flash: PackedFloat32Array
 
+# local faction index -> Tuning.FACTION_COLORS index; empty = identity (battle_scene)
+var palette: PackedInt32Array = PackedInt32Array()
+
 
 func _init() -> void:
 	spark_x = PackedFloat32Array()
@@ -108,14 +111,24 @@ func _ready() -> void:
 	add_child(sparks)
 
 
-static func build_buffer(s: BattleState) -> PackedFloat32Array:
+## Colour for local battle faction `f`. `palette` maps local faction index ->
+## Tuning.FACTION_COLORS index (the world faction's colour, set by BattleView);
+## an empty palette or a -1 entry falls back to the local index itself.
+static func faction_color(f: int, palette: PackedInt32Array) -> Color:
+	var ci: int = f
+	if f >= 0 and f < palette.size() and palette[f] >= 0:
+		ci = palette[f]
+	return Tuning.FACTION_COLORS[ci % Tuning.FACTION_COLORS.size()]
+
+
+static func build_buffer(s: BattleState, palette: PackedInt32Array = PackedInt32Array()) -> PackedFloat32Array:
 	var buf := PackedFloat32Array()
 	buf.resize(s.n * 16)
 	for i in range(s.n):
 		var b := i * 16
 		var dead: bool = s.state[i] == BattleState.State.DEAD
 		var sc: float = 0.0 if dead else s.radius[i]
-		var c: Color = Tuning.FACTION_COLORS[s.faction_id[i] % Tuning.FACTION_COLORS.size()]
+		var c: Color = faction_color(s.faction_id[i], palette)
 		var g: float = 0.0
 		if not dead and s.spin_cap[i] > 0.0:
 			g = clampf(s.spin[i] / s.spin_cap[i], 0.0, 1.0)
@@ -285,7 +298,7 @@ func refresh() -> void:
 		hp_bars.multimesh.instance_count = state.n
 	if weapon_flash.size() < state.n:
 		weapon_flash.resize(state.n)
-	_buf = build_buffer(state)
+	_buf = build_buffer(state, palette)
 	RenderingServer.multimesh_set_buffer(bodies.multimesh.get_rid(), _buf)
 	_weapon_buf = build_weapon_buffer(state, weapon_flash)
 	RenderingServer.multimesh_set_buffer(weapons.multimesh.get_rid(), _weapon_buf)

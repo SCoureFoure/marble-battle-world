@@ -27,6 +27,7 @@ standalone demo battle, not reached from the main scene).
 | `scripts/render/spectate_panel.gd` | `SpectatePanel`: stack/unit info panel. |
 | `scripts/render/timeline_panel.gd` | `TimelinePanel`: scrolling `events_log` tail. |
 | `scripts/render/battle_view.gd` | `BattleView`: popup `SubViewport` battle arena for one live `BattleInstance`. |
+| `scripts/render/battle_aftermath.gd` | `BattleAftermath`: cosmetic post-battle chase/celebration on a finished battle's orphaned `BattleState`, plus result-banner text. |
 | `scenes/world.tscn` | Main scene (`project.godot` `run/main_scene`); root node runs `world_scene.gd`. |
 | `scenes/battle.tscn` | Standalone battle demo scene; root node runs `battle_scene.gd`. |
 | `shaders/marble_body.gdshader` | Marble fill, rim highlight, rank ring, captain dot. |
@@ -149,6 +150,23 @@ is open; mouse handling in that function is skipped entirely while
    actor, `LEVEL` → `"LVL %d"` at the actor, `CAPTAIN_DEAD` → `"CAPTAIN
    DOWN"` at the target; both also refresh a `"Captain %d"` label per live
    `faction_captain` every frame.
+9. Aftermath: when the watched battle ends, `BattleBridge.finish` drops it
+   from `world.battles` and nothing in the world touches its `BattleState`
+   again. `scripts/render/battle_view.gd::_process` notices the instance is
+   gone and calls `::_start_aftermath`: a top banner (`"<FACTION> VICTORY"`
+   in the winner's colour with the winning stacks underneath, or
+   `"STALEMATE"`) fades in, and a `BattleAftermath` steps the orphaned state
+   at `Tuning.DT` on real frame time (at most 4 steps per frame, frozen while
+   the world is paused, unaffected by world speed).
+   `scripts/render/battle_aftermath.gd::step`: winners that were assigned a
+   nearby fleeing marble (`::_assign_chasers`, up to 2 chasers per fleer
+   within 240 px, never the captain) chase it for 2.5 s; every other winner
+   circles its captain (or the winners' starting centroid) with twirling
+   weapons and a pulsing spin glow; losers run for their home edge and
+   disappear there. Movement reuses `BattleSim.integrate` without hazards
+   plus `Collision.resolve` with `bump_cd` pinned, and `Weapons.tick` never
+   runs, so nothing takes damage. The view stays open until `Esc` / right
+   click, as before; the aftermath changes no world result.
 
 ### Panels
 

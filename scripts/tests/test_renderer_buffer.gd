@@ -53,11 +53,11 @@ func _init() -> void:
 	t.check(buf4[8] == 0.0, "buf[8] glow == 0.0 after DEAD")
 	t.check(t.approx(buf4[3], 100.0), "buf[3] still approx 100.0 after DEAD")
 
-	# Case 5: faction 9 wraps to FACTION_COLORS[1]
+	# Case 5: faction 9 maps to FACTION_COLORS[9] (16 colours, M9)
 	var s5 := BattleState.new(4, 1)
 	s5.spawn(0.0, 0.0, 9, 0, 0, false)
 	var buf5 := BattleRenderer.build_buffer(s5)
-	t.check(t.approx(buf5[12], 0.2), "faction 9 wraps to color index 1, buf[12] approx 0.2")
+	t.check(t.approx(buf5[12], 0.4), "faction 9 uses color index 9, buf[12] approx 0.4")
 
 	# Case 6: captain rank 1 -> ca approx 1/3 + 2 = 2.3333
 	var s6 := BattleState.new(4, 1)

@@ -170,5 +170,127 @@ func _init() -> void:
 	t.check(String(w8.events_log[w8.events_log.size() - 1]).contains("fell"), "check_death: events_log last line contains 'fell'")
 	t.check(w8.faction_alive[0] == 1, "check_death: faction_alive[0] stays 1 (has a stack)")
 
+	# 9. recycle: faction slot recycling
+	var w9 := World.new()
+	w9.setup_blank(12, 8, 6)
+	w9.faction_count = 4
+	for f in range(4):
+		w9.faction_alive[f] = 1 if f != 1 else 0  # faction 1 is dead
+	w9.faction_names = ["A", "Old", "C", "D"]
+	w9.add_relation(1, 2, -0.9)
+	w9.split_cooldown[1] = 12.0
+	w9.ktraits[2 * 5 + 0] = 0.9  # faction 2 aggression
+	var g9 := Kingdoms.new_faction(w9, 2)
+	t.check(g9 == 1, "recycle: new_faction returns 1")
+	t.check(w9.faction_count == 4, "recycle: faction_count stays 4")
+	t.check(w9.faction_alive[1] == 1, "recycle: faction_alive[1] == 1")
+	t.check(t.approx(w9.relation(1, 2), 0.0), "recycle: relation(1,2) reset to 0")
+	t.check(t.approx(w9.relation(2, 1), 0.0), "recycle: relation(2,1) reset to 0")
+	t.check(t.approx(w9.split_cooldown[1], 0.0), "recycle: split_cooldown[1] reset to 0")
+	t.check(t.approx(w9.ktrait(1, 0), 0.9), "recycle: ktrait(1,0) copied from faction 2")
+	t.check(t.approx(w9.ktrait(1, 4), Tuning.KTRAIT_INIT), "recycle: ktrait(1,4) reset to KTRAIT_INIT")
+	t.check(String(w9.faction_names[1]) != "Old", "recycle: faction_names[1] changed from Old")
+	t.check(w9.faction_names.size() == 4, "recycle: faction_names.size() stays 4")
+	t.check(w9.plinko_order[1].size() == Tuning.PLINKO_SLOTS, "recycle: plinko_order[1] has PLINKO_SLOTS elements")
+
+	# 10. append: add new faction when no recycled slots
+	var w10 := World.new()
+	w10.setup_blank(12, 8, 6)
+	w10.faction_count = 3
+	for f in range(3):
+		w10.faction_alive[f] = 1
+	w10.faction_names = ["A", "B", "C"]
+	var g10 := Kingdoms.new_faction(w10, 0)
+	t.check(g10 == 3, "append: new_faction returns 3")
+	t.check(w10.faction_count == 4, "append: faction_count incremented to 4")
+	t.check(w10.faction_names.size() == 4, "append: faction_names.size() == 4")
+
+	# 11. full: no free slots when MAX_FACTIONS_WORLD reached
+	var w11 := World.new()
+	w11.setup_blank(12, 8, 6)
+	w11.faction_count = Tuning.MAX_FACTIONS_WORLD
+	for f in range(Tuning.MAX_FACTIONS_WORLD):
+		w11.faction_alive[f] = 1
+	var rng_state_before := w11.rng.state
+	var g11 := Kingdoms.new_faction(w11, 0)
+	t.check(g11 == -1, "full: new_faction returns -1")
+	t.check(w11.faction_count == Tuning.MAX_FACTIONS_WORLD, "full: faction_count unchanged")
+	t.check(w11.rng.state == rng_state_before, "full: rng.state unchanged")
+	t.check(Kingdoms.has_free_slot(w11) == false, "full: has_free_slot returns false")
+	w11.faction_alive[40] = 0
+	t.check(Kingdoms.has_free_slot(w11) == true, "full: has_free_slot returns true after freeing slot 40")
+	var g11_retry := Kingdoms.new_faction(w11, 0)
+	t.check(g11_retry == 40, "full: new_faction reuses slot 40")
+
+	# 12. short names: grow faction_names array as needed
+	var w12 := World.new()
+	w12.setup_blank(12, 8, 6)
+	w12.faction_count = 5
+	for f in range(5):
+		w12.faction_alive[f] = 1
+	w12.faction_names = ["A", "B"]  # short array
+	var g12 := Kingdoms.new_faction(w12, 0)
+	t.check(g12 == 5, "short names: new_faction returns 5")
+	t.check(w12.faction_names.size() == 6, "short names: faction_names.size() grows to 6")
+	t.check(str(w12.faction_names[5]).length() > 0, "short names: faction_names[5] has content")
+
+	# 13. colour: faction_color set correctly
+	var w13 := World.new()
+	w13.setup_blank(12, 8, 6)
+	w13.faction_count = 9
+	for f in range(9):
+		w13.faction_alive[f] = 1
+	var g13 := Kingdoms.new_faction(w13, 0)
+	t.check(g13 == 9, "colour: new_faction returns 9")
+	t.check(w13.faction_color[9] == 9, "colour: faction_color[9] == 9")
+
+	# 14. check_split with no free slot: split blocked when full
+	var w14 := World.new()
+	w14.setup_blank(12, 8, 6)
+	w14.faction_count = Tuning.MAX_FACTIONS_WORLD
+	for f in range(Tuning.MAX_FACTIONS_WORLD):
+		w14.faction_alive[f] = 1
+	w14.add_ktrait(0, 4, -0.3)  # cohesion 0.5 -> 0.2
+	var big14 := mk_stack(w14, 0, 2, 2, 700)
+	Kingdoms.check_split(w14)
+	t.check(w14.faction_count == Tuning.MAX_FACTIONS_WORLD, "check_split full: faction_count stays at MAX")
+	t.check(w14.stacks.faction[big14] == 0, "check_split full: stack still in faction 0")
+	w14.faction_alive[Tuning.MAX_FACTIONS_WORLD - 1] = 0
+	Kingdoms.check_split(w14)
+	t.check(w14.faction_count == Tuning.MAX_FACTIONS_WORLD, "check_split full: faction_count unchanged after freeing slot")
+	t.check(w14.stacks.faction[big14] == Tuning.MAX_FACTIONS_WORLD - 1, "check_split full: split stack moved to recycled slot")
+
+	# 15. draw order: RNG draw sequence matches manual draws
+	var w15a := World.new()
+	w15a.setup_blank(12, 8, 6)
+	w15a.faction_count = 3
+	for f in range(3):
+		w15a.faction_alive[f] = 1
+	w15a.faction_names = ["A", "B", "C"]
+
+	var w15b := World.new()
+	w15b.setup_blank(12, 8, 6)
+	w15b.faction_count = 3
+	for f in range(3):
+		w15b.faction_alive[f] = 1
+	w15b.faction_names = ["A", "B", "C"]
+
+	var g15a := Kingdoms.new_faction(w15a, 0)
+
+	# Manually replicate the draws
+	var drawn_name := NameGen.kingdom_name(w15b.rng)
+	var drawn_order := PackedInt32Array()
+	drawn_order.resize(Tuning.PLINKO_SLOTS)
+	for k in range(Tuning.PLINKO_SLOTS):
+		drawn_order[k] = k
+	for k in range(drawn_order.size() - 1, 0, -1):
+		var j := w15b.rng.randi_range(0, k)
+		var tmp := drawn_order[k]
+		drawn_order[k] = drawn_order[j]
+		drawn_order[j] = tmp
+
+	t.check(w15a.rng.state == w15b.rng.state, "draw order: RNG states match")
+	t.check(String(w15a.faction_names[3]) == drawn_name, "draw order: faction_names[3] matches manual draw")
+
 	t.finish()
 	quit()

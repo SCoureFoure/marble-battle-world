@@ -2,7 +2,7 @@ class_name WorldGen
 extends RefCounted
 ## Overworld map generation. Source: docs/ARCHITECTURE.md §11.2.
 
-static func generate(m: WorldMap) -> Array:
+static func generate(m: WorldMap, town_count: int = -1) -> Array:
 	var elevation := PackedFloat32Array()
 	elevation.resize(m.cols * m.rows)
 
@@ -46,7 +46,8 @@ static func generate(m: WorldMap) -> Array:
 	_scatter(m, WorldMap.Kind.RUIN, 6)
 	_scatter(m, WorldMap.Kind.GRAVEYARD, 6)
 
-	var town_count: int = Tuning.N_FACTIONS * Tuning.TOWNS_PER_FACTION + Tuning.NEUTRAL_TOWNS
+	if town_count == -1:
+		town_count = Tuning.N_FACTIONS * Tuning.TOWNS_PER_FACTION + Tuning.NEUTRAL_TOWNS
 	var towns: Array[Vector2i] = []
 	for i in range(town_count):
 		var placed := _place_town(m, towns)

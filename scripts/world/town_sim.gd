@@ -39,10 +39,15 @@ static func _recruit(w: World, town_id: int, dt: float) -> void:
 	var f := w.town_owner[town_id]
 	w.town_recruit[town_id] += Tuning.TOWN_RECRUIT_RATE * dt
 	while w.town_recruit[town_id] >= 1.0 and w.town_pop[town_id] >= 1.0:
+		var target := _recruit_target(w, town_id, f)
+		# Stack or unit table full: hold the recruit (capped at one pending) instead
+		# of writing through a -1 id.
+		if (target == -1 and w.stacks.n >= w.stacks.cap) or w.units.n >= w.units.cap:
+			w.town_recruit[town_id] = minf(w.town_recruit[town_id], 1.0)
+			break
 		w.town_recruit[town_id] -= 1.0
 		w.town_pop[town_id] -= 1.0
 
-		var target := _recruit_target(w, town_id, f)
 		if target == -1:
 			var tile := Vector2i(int(w.towns[town_id].x), int(w.towns[town_id].y))
 			var c := w.map.center_of(tile.x, tile.y)

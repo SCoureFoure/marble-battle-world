@@ -98,114 +98,9 @@ func step(s: BattleState, dt: float) -> void:
 
 	var radius := s.radius
 	var arena := s.arena
-	var left := arena.position.x
-	var right := arena.end.x
-	var top := arena.position.y
-	var bottom := arena.end.y
-
-	var ox: float = terrain.origin.x if terrain else 0.0
-	var oy: float = terrain.origin.y if terrain else 0.0
-	var inv_cell: float = 1.0 / terrain.cell if terrain else 0.0
-	var cols: int = terrain.cols if terrain else 0
-	var rows: int = terrain.rows if terrain else 0
 	var kind: PackedByteArray = terrain.kind if terrain else PackedByteArray()
-	var friction: PackedFloat32Array = terrain.friction if terrain else PackedFloat32Array()
-	var near_solid: PackedByteArray = terrain.near_solid if terrain else PackedByteArray()
-	var slope_x: PackedFloat32Array = terrain.slope_x if terrain else PackedFloat32Array()
-	var slope_y: PackedFloat32Array = terrain.slope_y if terrain else PackedFloat32Array()
-	var fr_plain: float = pow(Tuning.DRAG_KEEP_PER_S[0], dt)
 
-	for i in range(s.n):
-		if s.state[i] == BattleState.State.DEAD:
-			continue
-		var r := radius[i]
-
-		var c: int = -1
-		if terrain:
-			var cx: int = clampi(int((s.px[i] - ox) * inv_cell), 0, cols - 1)
-			var cy: int = clampi(int((s.py[i] - oy) * inv_cell), 0, rows - 1)
-			c = cy * cols + cx
-
-		var vx: float = s.vx[i] + s.ax[i] * Tuning.FORCE_SCALE * dt
-		var vy: float = s.vy[i] + s.ay[i] * Tuning.FORCE_SCALE * dt
-		if terrain:
-			vx += slope_x[c] * Tuning.FORCE_SCALE * dt
-			vy += slope_y[c] * Tuning.FORCE_SCALE * dt
-		var fr: float = friction[c] if terrain else fr_plain
-		vx *= fr
-		vy *= fr
-
-		var speed := sqrt(vx * vx + vy * vy)
-		if speed > Tuning.MAX_SPEED:
-			vx *= Tuning.MAX_SPEED / speed
-			vy *= Tuning.MAX_SPEED / speed
-		s.px[i] += vx * dt
-		s.py[i] += vy * dt
-
-		if s.px[i] < left + r:
-			s.px[i] = left + r
-			vx = absf(vx) * Tuning.RESTITUTION
-		if s.px[i] > right - r:
-			s.px[i] = right - r
-			vx = -absf(vx) * Tuning.RESTITUTION
-		if s.py[i] < top + r:
-			s.py[i] = top + r
-			vy = absf(vy) * Tuning.RESTITUTION
-		if s.py[i] > bottom - r:
-			s.py[i] = bottom - r
-			vy = -absf(vy) * Tuning.RESTITUTION
-
-		# obstacles: 3x3 terrain cells around the marble's (post wall-clamp) cell
-		if terrain:
-			var mcx: int = clampi(int((s.px[i] - ox) * inv_cell), 0, cols - 1)
-			var mcy: int = clampi(int((s.py[i] - oy) * inv_cell), 0, rows - 1)
-			c = mcy * cols + mcx
-			if near_solid[c] == 1:
-				for gx in range(mcx - 1, mcx + 2):
-					if gx < 0 or gx >= cols:
-						continue
-					for gy in range(mcy - 1, mcy + 2):
-						if gy < 0 or gy >= rows:
-							continue
-						var oc: int = gy * cols + gx
-						if not TerrainGrid.is_solid(kind[oc]):
-							continue
-						var centre := terrain.cell_center(oc)
-						var obs_r: float = Tuning.TERRAIN_CELL * Tuning.OBSTACLE_RADIUS_FRAC
-						var odx := s.px[i] - centre.x
-						var ody := s.py[i] - centre.y
-						var odist := sqrt(odx * odx + ody * ody)
-						if odist < obs_r + r:
-							var nx: float
-							var ny: float
-							if odist > 0.0:
-								nx = odx / odist
-								ny = ody / odist
-							else:
-								nx = 1.0
-								ny = 0.0
-							s.px[i] = centre.x + nx * (obs_r + r)
-							s.py[i] = centre.y + ny * (obs_r + r)
-							var vn := vx * nx + vy * ny
-							if vn < 0.0:
-								vx -= (1.0 + Tuning.RESTITUTION) * vn * nx
-								vy -= (1.0 + Tuning.RESTITUTION) * vn * ny
-
-		s.vx[i] = vx
-		s.vy[i] = vy
-
-		# hazard, re-evaluated at the (possibly obstacle-pushed) new position
-		if terrain:
-			c = terrain.cell_at(s.px[i], s.py[i])
-			var k1: int = terrain.kind[c]
-			var dps: float = Tuning.HAZARD_DPS[k1]
-			if dps > 0.0:
-				s.hp[i] -= dps * dt
-				if s.hp[i] <= 0.0:
-					s.hp[i] = 0.0
-					s.state[i] = BattleState.State.DEAD
-					s.faction_alive[faction_id[i]] -= 1
-					s.events.append([BattleState.Event.KILL, -1, i])
+	integrate(s, dt, true)
 
 	# tower ownership + auras (once per tower cell per tick, before applying auras)
 	if terrain:
@@ -309,6 +204,124 @@ func step(s: BattleState, dt: float) -> void:
 
 	s.tick += 1
 	s.time += dt
+
+
+## Tick step 6: forces -> velocity, terrain slope/friction, speed clamp, move,
+## arena walls, obstacle push-out, then hazard damage when `apply_hazards`.
+## BattleAftermath reuses it with apply_hazards = false, so the post-battle
+## replay moves marbles the same way but can never kill one.
+func integrate(s: BattleState, dt: float, apply_hazards: bool) -> void:
+	var faction_id := s.faction_id
+	var radius := s.radius
+	var arena := s.arena
+	var left := arena.position.x
+	var right := arena.end.x
+	var top := arena.position.y
+	var bottom := arena.end.y
+
+	var ox: float = terrain.origin.x if terrain else 0.0
+	var oy: float = terrain.origin.y if terrain else 0.0
+	var inv_cell: float = 1.0 / terrain.cell if terrain else 0.0
+	var cols: int = terrain.cols if terrain else 0
+	var rows: int = terrain.rows if terrain else 0
+	var kind: PackedByteArray = terrain.kind if terrain else PackedByteArray()
+	var friction: PackedFloat32Array = terrain.friction if terrain else PackedFloat32Array()
+	var near_solid: PackedByteArray = terrain.near_solid if terrain else PackedByteArray()
+	var slope_x: PackedFloat32Array = terrain.slope_x if terrain else PackedFloat32Array()
+	var slope_y: PackedFloat32Array = terrain.slope_y if terrain else PackedFloat32Array()
+	var fr_plain: float = pow(Tuning.DRAG_KEEP_PER_S[0], dt)
+
+	for i in range(s.n):
+		if s.state[i] == BattleState.State.DEAD:
+			continue
+		var r := radius[i]
+
+		var c: int = -1
+		if terrain:
+			var cx: int = clampi(int((s.px[i] - ox) * inv_cell), 0, cols - 1)
+			var cy: int = clampi(int((s.py[i] - oy) * inv_cell), 0, rows - 1)
+			c = cy * cols + cx
+
+		var vx: float = s.vx[i] + s.ax[i] * Tuning.FORCE_SCALE * dt
+		var vy: float = s.vy[i] + s.ay[i] * Tuning.FORCE_SCALE * dt
+		if terrain:
+			vx += slope_x[c] * Tuning.FORCE_SCALE * dt
+			vy += slope_y[c] * Tuning.FORCE_SCALE * dt
+		var fr: float = friction[c] if terrain else fr_plain
+		vx *= fr
+		vy *= fr
+
+		var speed := sqrt(vx * vx + vy * vy)
+		if speed > Tuning.MAX_SPEED:
+			vx *= Tuning.MAX_SPEED / speed
+			vy *= Tuning.MAX_SPEED / speed
+		s.px[i] += vx * dt
+		s.py[i] += vy * dt
+
+		if s.px[i] < left + r:
+			s.px[i] = left + r
+			vx = absf(vx) * Tuning.RESTITUTION
+		if s.px[i] > right - r:
+			s.px[i] = right - r
+			vx = -absf(vx) * Tuning.RESTITUTION
+		if s.py[i] < top + r:
+			s.py[i] = top + r
+			vy = absf(vy) * Tuning.RESTITUTION
+		if s.py[i] > bottom - r:
+			s.py[i] = bottom - r
+			vy = -absf(vy) * Tuning.RESTITUTION
+
+		# obstacles: 3x3 terrain cells around the marble's (post wall-clamp) cell
+		if terrain:
+			var mcx: int = clampi(int((s.px[i] - ox) * inv_cell), 0, cols - 1)
+			var mcy: int = clampi(int((s.py[i] - oy) * inv_cell), 0, rows - 1)
+			c = mcy * cols + mcx
+			if near_solid[c] == 1:
+				for gx in range(mcx - 1, mcx + 2):
+					if gx < 0 or gx >= cols:
+						continue
+					for gy in range(mcy - 1, mcy + 2):
+						if gy < 0 or gy >= rows:
+							continue
+						var oc: int = gy * cols + gx
+						if not TerrainGrid.is_solid(kind[oc]):
+							continue
+						var centre := terrain.cell_center(oc)
+						var obs_r: float = Tuning.TERRAIN_CELL * Tuning.OBSTACLE_RADIUS_FRAC
+						var odx := s.px[i] - centre.x
+						var ody := s.py[i] - centre.y
+						var odist := sqrt(odx * odx + ody * ody)
+						if odist < obs_r + r:
+							var nx: float
+							var ny: float
+							if odist > 0.0:
+								nx = odx / odist
+								ny = ody / odist
+							else:
+								nx = 1.0
+								ny = 0.0
+							s.px[i] = centre.x + nx * (obs_r + r)
+							s.py[i] = centre.y + ny * (obs_r + r)
+							var vn := vx * nx + vy * ny
+							if vn < 0.0:
+								vx -= (1.0 + Tuning.RESTITUTION) * vn * nx
+								vy -= (1.0 + Tuning.RESTITUTION) * vn * ny
+
+		s.vx[i] = vx
+		s.vy[i] = vy
+
+		# hazard, re-evaluated at the (possibly obstacle-pushed) new position
+		if apply_hazards and terrain:
+			c = terrain.cell_at(s.px[i], s.py[i])
+			var k1: int = terrain.kind[c]
+			var dps: float = Tuning.HAZARD_DPS[k1]
+			if dps > 0.0:
+				s.hp[i] -= dps * dt
+				if s.hp[i] <= 0.0:
+					s.hp[i] = 0.0
+					s.state[i] = BattleState.State.DEAD
+					s.faction_alive[faction_id[i]] -= 1
+					s.events.append([BattleState.Event.KILL, -1, i])
 
 
 func winner(s: BattleState) -> int:

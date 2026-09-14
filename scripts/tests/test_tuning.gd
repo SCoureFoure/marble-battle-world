@@ -17,7 +17,7 @@ func _init() -> void:
 	t.check(Tuning.WEAPON_HIT_R.size() == Tuning.WEAPON_COUNT, "Tuning.WEAPON_HIT_R.size() == Tuning.WEAPON_COUNT")
 	t.check(Tuning.WEAPON_REACH[2] == 2.0, "Tuning.WEAPON_REACH[2] == 2.0 (spear outranges)")
 	t.check(Tuning.WEAPON_DMG[3] > Tuning.WEAPON_DMG[1], "Tuning.WEAPON_DMG[3] > Tuning.WEAPON_DMG[1] (axe > sword)")
-	t.check(Tuning.FACTION_COLORS.size() == 8, "Tuning.FACTION_COLORS.size() == 8")
+	t.check(Tuning.FACTION_COLORS.size() == 16, "Tuning.FACTION_COLORS.size() == 16")
 	t.check(Tuning.HOME_DIR.size() == 4, "Tuning.HOME_DIR.size() == 4")
 	t.check(Tuning.HOME_DIR[1] == Vector2(1, 0), "Tuning.HOME_DIR[1] == Vector2(1, 0)")
 	t.check(t.approx(Tuning.SPIN_TO_RAD, 0.10471976), "Tuning.SPIN_TO_RAD approx 0.10471976")
@@ -65,11 +65,11 @@ func _init() -> void:
 	t.check(Tuning.LEGEND_RANK == 3, "Tuning.LEGEND_RANK == 3")
 	t.check(Tuning.KTRAIT_INIT == 0.5, "Tuning.KTRAIT_INIT == 0.5")
 	t.check(Tuning.REL_ALLY_THRESHOLD == 0.5, "Tuning.REL_ALLY_THRESHOLD == 0.5")
-	t.check(Tuning.MAX_FACTIONS_WORLD == 16, "Tuning.MAX_FACTIONS_WORLD == 16")
+	t.check(Tuning.MAX_FACTIONS_WORLD == 64, "Tuning.MAX_FACTIONS_WORLD == 64")
 	t.check(Tuning.SPLIT_UNITS == 600, "Tuning.SPLIT_UNITS == 600")
 	t.check(Tuning.PLINKO_BIAS_GREED == 200.0, "Tuning.PLINKO_BIAS_GREED == 200.0")
 
-	t.check(Tuning.SAVE_VERSION == 1, "Tuning.SAVE_VERSION == 1")
+	t.check(Tuning.SAVE_VERSION == 2, "Tuning.SAVE_VERSION == 2")
 	t.check(Tuning.SPEED_STEPS.size() == 3, "Tuning.SPEED_STEPS.size() == 3")
 
 	t.check(Tuning.ALLY_MIN_VREL == 80.0, "Tuning.ALLY_MIN_VREL == 80.0")
@@ -88,6 +88,22 @@ func _init() -> void:
 	t.check(Tuning.STICKY_BONUS == 2.0, "Tuning.STICKY_BONUS == 2.0")
 	t.check(Tuning.SPREAD_KEEP == 1.0, "Tuning.SPREAD_KEEP == 1.0")
 	t.check(Tuning.CRUISE_SPEED < Tuning.RETREAT_SPEED and Tuning.RETREAT_SPEED < Tuning.CHARGE_SPEED and Tuning.CHARGE_SPEED <= Tuning.MAX_SPEED, "CRUISE_SPEED < RETREAT_SPEED and RETREAT_SPEED < CHARGE_SPEED and CHARGE_SPEED <= MAX_SPEED")
+
+	t.check(Tuning.HERO_LIFESPAN == 900.0, "Tuning.HERO_LIFESPAN == 900.0")
+	t.check(Tuning.KINGDOMS_MIN == 2, "Tuning.KINGDOMS_MIN == 2")
+	t.check(Tuning.RECRUIT_COST == 2.0, "Tuning.RECRUIT_COST == 2.0")
+	t.check(Tuning.FOUND_SCORE == 200.0, "Tuning.FOUND_SCORE == 200.0")
+	t.check(Tuning.FACTION_COLORS.size() == 16, "Tuning.FACTION_COLORS.size() == 16")
+	t.check(Tuning.FACTION_COLORS[8] == Color(0.95,0.4,0.6), "Tuning.FACTION_COLORS[8] == Color(0.95,0.4,0.6)")
+
+	var rng_epithet := RandomNumberGenerator.new()
+	rng_epithet.seed = 5
+	var epithet1 := NameGen.hero_epithet(rng_epithet)
+	t.check(NameGen.LEGEND_ADJECTIVES.has(epithet1), "NameGen.hero_epithet(rng seeded 5) returns a String in LEGEND_ADJECTIVES")
+	var rng_epithet2 := RandomNumberGenerator.new()
+	rng_epithet2.seed = 5
+	var epithet2 := NameGen.hero_epithet(rng_epithet2)
+	t.check(epithet1 == epithet2, "two rngs seeded 5 return the same value from NameGen.hero_epithet")
 
 	t.finish()
 	quit()

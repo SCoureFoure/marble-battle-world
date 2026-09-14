@@ -72,10 +72,12 @@ spawns `count` rank-0 marbles at uniform-random points in a `Rect2`
    `ENGAGE_RADIUS_MULT * BASE_RADIUS`) spatial hashes over all live marbles.
 3. Retarget: `scripts/sim/forces.gd::retarget`.
 4. Forces: `scripts/sim/forces.gd::accumulate`.
-5. Integrate: per live marble, apply acceleration, terrain slope/friction,
-   speed clamp, move, clamp to arena walls, push out of terrain obstacles,
-   apply terrain hazard damage, then (if any marble stands in a `TOWER`
-   cell) resolve tower ownership and apply its aura.
+5. Integrate: `scripts/sim/battle_sim.gd::integrate(s, dt, true)` — per live
+   marble, apply acceleration, terrain slope/friction, speed clamp, move,
+   clamp to arena walls, push out of terrain obstacles, apply terrain hazard
+   damage; then `step` itself (if any marble stands in a `TOWER` cell)
+   resolves tower ownership and applies its aura. The post-battle aftermath
+   calls `integrate` with `apply_hazards = false`.
 6. Collision: `scripts/sim/collision.gd::resolve`.
 7. Weapons: `scripts/sim/weapons.gd::tick`.
 8. Spin decay: every live marble's `spin` decays toward `RPM_MIN`.

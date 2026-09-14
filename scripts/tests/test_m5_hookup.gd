@@ -101,7 +101,7 @@ func _init() -> void:
 	mk_stack(w4, 0, 4, 3, 5)
 	var before_n4 := w4.units.n
 
-	TownSim.step(w4, 200.0)  # RECRUIT_RATE 0.10/s * 200s = 20 recruits
+	TownSim.step(w4, 400.0)  # RECRUIT_RATE 0.05/s * 400s = 20 recruits
 
 	var added4 := w4.units.n - before_n4
 	t.check(added4 == 20, "case4 20 units recruited")

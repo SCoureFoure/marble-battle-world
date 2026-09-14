@@ -36,10 +36,31 @@ static func step(inst: BattleInstance, dt: float) -> void:
 
 	# 2. distribute each side's damage over live enemy sides, in chunks of
 	# roughly CHUNK_SIZE, onto uniformly-drawn targets/attackers.
+	# Per-side lists are built once (ascending marble index) and kept in sync
+	# by removing each marble as it dies, so every draw sees exactly the list a
+	# fresh scan would give. Morale hits from deaths are tallied per side and
+	# applied once after this pass: all hits are negative and clamped at 0, so
+	# the sum equals applying them one death at a time for every marble still
+	# alive, and nothing reads morale before step 3.
+	var engage: Array = [[], [], [], []]
+	var targets_of: Array = [[], [], [], []]
+	for i in range(s.n):
+		var st: int = s.state[i]
+		if st == BattleState.State.DEAD:
+			continue
+		var fid3: int = s.faction_id[i]
+		if fid3 < 0 or fid3 >= 4:
+			continue
+		targets_of[fid3].append(i)
+		if st == BattleState.State.ENGAGE:
+			engage[fid3].append(i)
+	var deaths := PackedInt32Array([0, 0, 0, 0])
+	var captain_deaths := PackedInt32Array([0, 0, 0, 0])
+
 	for side in range(4):
 		if rate[side] <= 0.0:
 			continue
-		var attackers := _live_engage(s, side)
+		var attackers: Array = engage[side]
 		if attackers.is_empty():
 			continue
 
@@ -59,7 +80,7 @@ static func step(inst: BattleInstance, dt: float) -> void:
 				continue
 			var chunks: int = maxi(1, int(ceil(d_other / CHUNK_SIZE)))
 			var chunk: float = d_other / float(chunks)
-			var targets := _live_targets(s, other)
+			var targets: Array = targets_of[other]
 			for _c in range(chunks):
 				if targets.is_empty():
 					break
@@ -67,9 +88,24 @@ static func step(inst: BattleInstance, dt: float) -> void:
 				var t: int = targets[ti]
 				var ai: int = s.rng.randi_range(0, attackers.size() - 1)
 				var a: int = attackers[ai]
+				var was_engaged: bool = s.state[t] == BattleState.State.ENGAGE
 				var died := _apply_hit(s, inst, a, t, chunk)
 				if died:
 					targets.remove_at(ti)
+					if was_engaged:
+						engage[other].erase(t)
+					deaths[other] += 1
+					if s.is_captain[t] == 1:
+						captain_deaths[other] += 1
+
+	for m in range(s.n):
+		if s.state[m] == BattleState.State.DEAD:
+			continue
+		var fm: int = s.faction_id[m]
+		if fm < 0 or fm >= 4 or deaths[fm] == 0:
+			continue
+		var hit: float = deaths[fm] * Tuning.MORALE_HIT_ALLY_DEATH + captain_deaths[fm] * Tuning.MORALE_HIT_CAPTAIN_DEAD
+		s.morale[m] = maxf(0.0, s.morale[m] + hit)
 
 	# 3. spin decay, morale/hp retreat trigger (as BattleSim step 10), and
 	# the hit_cd-as-flee-timer for RETREAT marbles (fiat).
@@ -98,26 +134,9 @@ static func step(inst: BattleInstance, dt: float) -> void:
 	s.time += dt
 
 
-static func _live_engage(s: BattleState, side: int) -> Array:
-	var out: Array = []
-	for i in range(s.n):
-		if s.faction_id[i] == side and s.state[i] == BattleState.State.ENGAGE:
-			out.append(i)
-	return out
-
-
-static func _live_targets(s: BattleState, side: int) -> Array:
-	var out: Array = []
-	for i in range(s.n):
-		if s.faction_id[i] != side:
-			continue
-		if s.state[i] == BattleState.State.ENGAGE or s.state[i] == BattleState.State.RETREAT:
-			out.append(i)
-	return out
-
-
 ## Applies `chunk` damage from attacker `a` to target `t`; returns true when
-## `t` dies. Mirrors Weapons.tick steps 7-9 (damage/xp/kill/rank-up).
+## `t` dies. Mirrors Weapons.tick steps 7-9 (damage/xp/kill/rank-up). The
+## caller applies the death's morale hit to `t`'s side (batched per tick).
 static func _apply_hit(s: BattleState, inst: BattleInstance, a: int, t: int, chunk: float) -> bool:
 	s.hp[t] -= chunk
 
@@ -139,13 +158,7 @@ static func _apply_hit(s: BattleState, inst: BattleInstance, a: int, t: int, chu
 		var ft: int = s.faction_id[t]
 		s.faction_alive[ft] -= 1
 		s.events.append([BattleState.Event.KILL, a, t])
-		var captain_dead: bool = s.is_captain[t] == 1
-		for m in range(s.n):
-			if s.state[m] != BattleState.State.DEAD and s.faction_id[m] == ft:
-				s.morale[m] = maxf(0.0, s.morale[m] + Tuning.MORALE_HIT_ALLY_DEATH)
-				if captain_dead:
-					s.morale[m] = maxf(0.0, s.morale[m] + Tuning.MORALE_HIT_CAPTAIN_DEAD)
-		if captain_dead:
+		if s.is_captain[t] == 1:
 			s.faction_captain[ft] = -1
 			s.events.append([BattleState.Event.CAPTAIN_DEAD, a, t])
 

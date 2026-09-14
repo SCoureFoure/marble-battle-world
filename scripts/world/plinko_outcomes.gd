@@ -132,7 +132,7 @@ static func _recruit(w: World, stack: int, f: int) -> String:
 		n = n / 2
 	var added := 0
 	for _i in range(n):
-		if w.stacks.count[stack] >= Tuning.STACK_CAP:
+		if w.stacks.count[stack] >= Tuning.STACK_CAP or w.units.n >= w.units.cap:
 			break
 		var weapon := Kingdoms.recruit_weapon(w, f, w.rng)
 		w.units.add(f, 0, weapon, false, stack)
@@ -144,6 +144,7 @@ static func _recruit(w: World, stack: int, f: int) -> String:
 static func _raid(w: World, stack: int, f: int) -> String:
 	var town := _enemy_target(w, stack, f)
 	if town != -1:
+		Economy.raid_gold(w, stack, town)
 		w.town_state[town] = 1
 		w.town_owner[town] = -1
 		w.town_pop[town] *= 0.5
@@ -158,6 +159,7 @@ static func _raid(w: World, stack: int, f: int) -> String:
 static func _raze(w: World, stack: int, f: int) -> String:
 	var town := _enemy_target(w, stack, f)
 	if town != -1:
+		Economy.raid_gold(w, stack, town)
 		w.town_state[town] = 2
 		w.town_owner[town] = -1
 		w.town_pop[town] = 0.0

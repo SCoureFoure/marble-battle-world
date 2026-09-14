@@ -183,5 +183,62 @@ func _init() -> void:
 	t.check(wa.stacks.x == wb.stacks.x, "case10 stacks.x equal")
 	t.check(wa.next_battle_id == wb.next_battle_id, "case10 next_battle_id equal")
 
+	# Case 11: a battle finishing ahead of another in w.battles must not drop
+	# the later one (it used to be skipped and lost, its stacks stuck in BATTLE).
+	var w11 := World.new()
+	w11.setup_blank(20, 10, 7)
+	var battles11: Array = []
+	for tx in [3, 12]:
+		var c11 := w11.map.center_of(tx, 4)
+		var a11 := mk_stack(w11, 0, Vector2i(tx, 4), 20)
+		var b11 := mk_stack(w11, 1, Vector2i(tx, 4), 20)
+		w11.stacks.prev_x[a11] = c11.x - 64.0
+		w11.stacks.prev_y[a11] = c11.y
+		w11.stacks.prev_x[b11] = c11.x + 64.0
+		w11.stacks.prev_y[b11] = c11.y
+		battles11.append(BattleBridge.start(w11, a11, b11))
+	var first11: BattleInstance = battles11[0]
+	var second11: BattleInstance = battles11[1]
+	t.check(w11.battles.size() == 2 and w11.battles[0] == first11, "case11 setup two battles, first listed first")
+	var side1_11 := -1
+	for e11 in range(first11.faction_map.size()):
+		if first11.faction_map[e11] == 1:
+			side1_11 = e11
+	for m11 in range(first11.state.n):
+		if first11.state.faction_id[m11] == side1_11:
+			first11.state.state[m11] = BattleState.State.DEAD
+	WorldSim.step_battles(w11)
+	t.check(not w11.battles.has(first11), "case11 finished battle removed")
+	t.check(w11.battles.has(second11), "case11 later battle still live")
+	var stuck11 := false
+	for sid11 in first11.stack_ids:
+		if w11.stacks.alive[sid11] == 1 and w11.stacks.state[sid11] == Stacks.State.BATTLE:
+			stuck11 = true
+	t.check(not stuck11, "case11 finished battle's stacks left BATTLE")
+	var live11 := true
+	for sid11b in second11.stack_ids:
+		if w11.stacks.state[sid11b] != Stacks.State.BATTLE:
+			live11 = false
+	t.check(live11, "case11 later battle's stacks still BATTLE")
+	t.check(second11.state.tick == 1, "case11 later battle stepped this tick")
+
+	# Case 12: town recruitment with a full stack table writes nothing through -1.
+	var w12 := World.new()
+	w12.setup_blank(12, 8, 7)
+	var town12 := w12.add_town(Vector2i(5, 4), 0)
+	w12.sync_town_arrays()
+	w12.town_pop[town12] = 50.0
+	w12.town_recruit[town12] = 5.0
+	while w12.stacks.n < w12.stacks.cap:
+		w12.stacks.add(1, 0.0, 0.0, "Filler")
+	var last12: int = w12.stacks.cap - 1
+	var count_last12: int = w12.stacks.count[last12]
+	var goal_last12: int = w12.stacks.goal[last12]
+	var units_before12 := w12.units.n
+	TownSim.step(w12, Tuning.DT)
+	t.check(w12.units.n == units_before12, "case12 no unit added with full stack table")
+	t.check(w12.stacks.count[last12] == count_last12 and w12.stacks.goal[last12] == goal_last12, "case12 last stack untouched (no -1 writes)")
+	t.check(t.approx(w12.town_pop[town12], 50.0, 0.01), "case12 town pop not consumed")
+
 	t.finish()
 	quit()

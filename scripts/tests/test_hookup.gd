@@ -38,9 +38,9 @@ func _init() -> void:
 	w1.add_town(Vector2i(3, 3), 0)
 	var s0_1 := mk_stack(w1, 0, Vector2i(4, 3), 10)
 
-	for _i in range(720):
+	for _i in range(1440):
 		WorldSim.step(w1, Tuning.DT)
-	t.check(w1.stacks.count[s0_1] == 11, "case1 count[s0] == 11 after 12s of town recruiting")
+	t.check(w1.stacks.count[s0_1] == 11, "case1 count[s0] == 11 after 24s of town recruiting")
 
 	# 2. Drill in bridge: spin_cap bonus applied on join.
 	var w2 := World.new()

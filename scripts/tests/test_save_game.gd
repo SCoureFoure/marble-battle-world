@@ -114,5 +114,40 @@ func _init() -> void:
 
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
 
+	# Case 5: M9 fields round-trip
+	var w_m9 := World.new()
+	w_m9.setup_blank(12, 8, 1)
+	w_m9.add_town(Vector2i(3, 3), 0)
+	var c_m9 := w_m9.map.center_of(3, 3)
+	var sid_m9 := w_m9.stacks.add(0, c_m9.x, c_m9.y, "S")
+	w_m9.units.add(0, 0, 0, false, sid_m9)
+	var uid1 := w_m9.units.add(0, 0, 0, false, sid_m9)
+	w_m9.stacks.recount(w_m9.units)
+
+	w_m9.units.hero[uid1] = 1
+	w_m9.units.career_start[uid1] = 12.5
+	w_m9.units.ambition[uid1] = 0.25
+	w_m9.units.mentor[uid1] = 0
+	w_m9.units.fate[0] = Units.Fate.RETIRED
+	w_m9.stacks.gold[sid_m9] = 33.5
+	w_m9.town_gold[0] = 7.25
+	w_m9.town_lord[0] = 1
+	w_m9.bump("promotions")
+
+	t.check(SaveGame.save(w_m9, SAVE_PATH) == OK, "save(M9 world) == OK")
+	var w_m9_2 := SaveGame.load(SAVE_PATH)
+	t.check(w_m9_2 != null, "load(M9 world) != null")
+	t.check(w_m9_2.units.hero[uid1] == 1, "round-trip: units.hero[uid1] == 1")
+	t.check(t.approx(w_m9_2.units.career_start[uid1], 12.5), "round-trip: units.career_start[uid1] approx 12.5")
+	t.check(t.approx(w_m9_2.units.ambition[uid1], 0.25), "round-trip: units.ambition[uid1] approx 0.25")
+	t.check(w_m9_2.units.mentor[uid1] == 0, "round-trip: units.mentor[uid1] == 0")
+	t.check(w_m9_2.units.fate[0] == Units.Fate.RETIRED, "round-trip: units.fate[0] == Units.Fate.RETIRED")
+	t.check(t.approx(w_m9_2.stacks.gold[sid_m9], 33.5), "round-trip: stacks.gold[sid_m9] approx 33.5")
+	t.check(t.approx(w_m9_2.town_gold[0], 7.25), "round-trip: town_gold[0] approx 7.25")
+	t.check(w_m9_2.town_lord[0] == 1, "round-trip: town_lord[0] == 1")
+	t.check(w_m9_2.history["promotions"] == 1, "round-trip: history[promotions] == 1")
+
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
+
 	t.finish()
 	quit()

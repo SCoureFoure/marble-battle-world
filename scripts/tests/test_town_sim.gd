@@ -38,16 +38,16 @@ func _init() -> void:
 	var w2 := mk_world()
 	var town2 := w2.add_town(Vector2i(3, 3), 0)
 	var s0_2 := mk_stack(w2, 0, Vector2i(4, 3), 10)
-	for _i in range(10):
+	for _i in range(20):
 		TownSim.step(w2, 1.0)
 	t.check(w2.stacks.count[s0_2] == 11, "case2 count[0] == 11")
 	t.check(t.approx(w2.town_recruit[town2], 0.0, 1e-4), "case2 town_recruit ~0")
-	t.check(t.approx(w2.town_pop[town2], 49.5, 1e-4), "case2 pop ~49.5")
+	t.check(t.approx(w2.town_pop[town2], 50.0, 1e-4), "case2 pop ~50.0")
 
 	# Case 3: no own stack -> garrison created and recruited into.
 	var w3 := mk_world()
 	w3.add_town(Vector2i(3, 3), 0)
-	for _i in range(10):
+	for _i in range(20):
 		TownSim.step(w3, 1.0)
 	t.check(w3.stacks.n == 1, "case3 stacks.n == 1")
 	t.check(w3.stacks.faction[0] == 0, "case3 faction[0] == 0")
@@ -59,7 +59,7 @@ func _init() -> void:
 	var w4 := mk_world()
 	w4.add_town(Vector2i(0, 3), 0)
 	var far4 := mk_stack(w4, 0, Vector2i(9, 3), 5)   # Chebyshev dist 9 > TOWN_RECRUIT_RANGE (8)
-	for _i in range(10):
+	for _i in range(20):
 		TownSim.step(w4, 1.0)
 	t.check(w4.stacks.n == 2, "case4 stacks.n == 2 (far stack + garrison)")
 	var garrison4 := -1
@@ -75,7 +75,7 @@ func _init() -> void:
 	w5.add_town(Vector2i(3, 3), 0)
 	var adj5 := mk_stack(w5, 0, Vector2i(4, 3), 5)
 	w5.stacks.state[adj5] = Stacks.State.BATTLE
-	for _i in range(10):
+	for _i in range(20):
 		TownSim.step(w5, 1.0)
 	t.check(w5.stacks.n == 2, "case5 stacks.n == 2 (battling stack + garrison)")
 	var garrison5 := -1

@@ -1387,3 +1387,391 @@ Appended keys (same sampling, live ENGAGE marbles):
 `mean_attackers` = over live marbles targeted by >= 1 ENGAGE marble, mean count;
 `pile_frac` = share of those with more than 2 attackers (counts computed from
 `target_id`, not `attackers`). Uses only pre-M8 APIs.
+
+## 17. M9 — free companies, gold, heroes, aging, settling, follow
+
+Leader intent (2026-09-13, `docs/future-state-and-ideas/hero-progression-and-settling-down.md`):
+random starting towns and free companies; stacks carry gold and recruit at towns;
+soldiers rise to named heroes and break away loyal or as a new free company;
+captains age, then found towns (rich/big) or retire; camera can follow a hero's
+legacy. Leader picks: faction cap raised with slot recycling; per-stack purse;
+hybrid recruiting (slow passive trickle + active RESTOCK trips); weighted defect
+roll; ~15 min career; rich/big founds else retires; founded-town allegiance by
+context; follow legacy (heir, then offshoot, then free camera).
+
+All numbers below are `fiat` (tunable). Every random draw goes through `w.rng`
+unless stated; draw order is part of the spec (determinism).
+
+### 17.1 Tuning (append to `Tuning`; edits marked)
+
+```
+# edits
+const MAX_FACTIONS_WORLD := 64          # was 16
+const TOWN_RECRUIT_RATE := 0.05         # was 0.10 (passive trickle slowed)
+const SAVE_VERSION := 2                 # was 1
+# FACTION_COLORS: append 8 entries (16 total):
+#   Color(0.95,0.4,0.6), Color(0.4,0.25,0.1), Color(0.6,0.9,0.3), Color(0.1,0.3,0.4),
+#   Color(0.95,0.95,0.6), Color(0.5,0.1,0.2), Color(0.7,0.7,1.0), Color(0.3,0.5,0.2)
+# population
+const KINGDOMS_MIN := 2
+const KINGDOMS_MAX := 5
+const COMPANIES_MIN := 3
+const COMPANIES_MAX := 8
+const TOWNS_MIN := 16
+const TOWNS_MAX := 30
+const COMPANY_UNITS_MIN := 12
+const COMPANY_UNITS_MAX := 30
+const COMPANY_SPAWN_MIN_DIST := 4
+const COMPANY_START_GOLD := 80.0
+const KINGDOM_STACK_GOLD := 40.0
+const START_AGE_SPREAD := 0.5
+# economy
+const TOWN_TAX_PER_POP := 0.002
+const TOWN_GOLD_MAX := 500.0
+const RECRUIT_COST := 2.0
+const PRICE_MULT_OWN := 1.0
+const PRICE_MULT_ALLY := 1.25
+const PRICE_MULT_NEUTRAL := 1.5
+const HEAL_COST := 0.2
+const LOOT_FRAC := 0.5
+const BOUNTY_PER_KILL := 0.5
+const RAID_GOLD_FRAC := 1.0
+const RESTOCK_WEIGHT := 4.0
+const RESTOCK_BELOW := 0.4
+const RESTOCK_MIN_BUY := 5
+const POOR_GOLD := 20.0
+const POOR_RAID_BONUS := 2.0
+# heroes
+const HERO_KILLS := 25
+const BREAKAWAY_MIN_STACK := 40
+const BREAKAWAY_DELAY := 30.0
+const BREAKAWAY_RATE := 0.02
+const FOLLOW_FRAC := 0.15
+const FOLLOW_PER_KILL := 0.5
+const BREAKAWAY_MIN_FOLLOWERS := 8
+const DEFECT_BASE := 0.15
+const DEFECT_AMBITION := 0.6
+const DEFECT_COHESION := 0.5
+const DEFECT_PIETY := 0.3
+const DEFECT_OUTSHINE := 0.2
+const DEFECT_RELATION := -0.4
+# aging / settling
+const HERO_LIFESPAN := 900.0
+const FOUND_GRACE := 120.0
+const FOUND_SCORE := 200.0
+const FOUND_UNIT_VALUE := 1.0
+const FOUND_SEARCH := 8
+const FOUND_MIN_SPACING := 4
+const FOUND_IDLE := 30.0
+```
+
+`NameGen.hero_epithet(rng) -> String`: one draw, `LEGEND_ADJECTIVES[rng.randi_range(0, size-1)]`.
+
+Every `f % 8` colour index becomes `f % Tuning.FACTION_COLORS.size()`.
+
+### 17.2 Fields
+
+`Units` (all sized `capacity`, reset by `Units.add`):
+`enum Fate { ACTIVE = 0, LORD = 1, RETIRED = 2 }`;
+`hero: PackedByteArray` (0), `career_start: PackedFloat32Array` (0.0, world time the
+unit became hero or captain), `ambition: PackedFloat32Array` (0.0), `mentor:
+PackedInt32Array` (-1, captain of the stack a hero broke away from), `fate:
+PackedByteArray` (ACTIVE). A LORD/RETIRED unit has `alive == 1`, `stack == -1`,
+`is_captain == 0`; nothing may treat "alive" as "has a stack".
+
+`Stacks`: `gold: PackedFloat32Array` (0.0; `add` sets 0.0). `Goal` appends
+`RESTOCK = 7, FOUND = 8`.
+
+`World`: `town_gold: PackedFloat32Array` (0.0), `town_lord: PackedInt32Array` (-1) —
+appended by `add_town`, grown by `sync_town_arrays`, reset in `_init`/`setup_blank`/`create`.
+`history: Dictionary` — int counters, keys `"promotions", "breakaways", "defections",
+"foundings", "retirements", "restocks"`, all 0 at `_init`/`setup_blank`/`create`.
+Helper `World.bump(key: String)`: `history[key] = int(history.get(key, 0)) + 1`.
+
+`BattleInstance`: `slayers: PackedInt32Array` — unit ids that killed a captain or hero
+this battle (empty at `_init`).
+
+`SaveGame`: units dict gains `hero, career_start, ambition, mentor, fate`; stacks dict
+gains `gold`; towns dict gains `town_gold, town_lord`; logs dict gains `history`.
+
+### 17.3 Economy (`scripts/world/economy.gd`, `class_name Economy`, static)
+
+- `accrue(w, dt)`: `w.sync_town_arrays()`; for each town with `town_state == 0`:
+  `town_gold[t] = minf(TOWN_GOLD_MAX, town_gold[t] + TOWN_TAX_PER_POP * town_pop[t] * dt)`.
+- `price(w, f, t) -> float`: owner `== f` → `RECRUIT_COST*PRICE_MULT_OWN`; owner `== -1` →
+  `*PRICE_MULT_NEUTRAL`; `w.allied(f, owner)` → `*PRICE_MULT_ALLY`; else `-1.0`.
+- `_buy_floor() = RECRUIT_COST * PRICE_MULT_NEUTRAL * RESTOCK_MIN_BUY` (15.0);
+  `_tax_floor() = RECRUIT_COST * RESTOCK_MIN_BUY` (10.0).
+- `wants_restock(w, s) -> bool`: `wounded` = alive units of `s` with `hp_frac < 0.5`.
+  True when (`count[s] < RESTOCK_BELOW * STACK_CAP` and (`gold[s] >= _buy_floor()` or some
+  town has owner `== f`, state 0, `town_gold >= _tax_floor()`)) or (`wounded >= maxi(1,
+  count[s] / 4)` and `gold[s] >= HEAL_COST * wounded`).
+- `restock_target(w, s) -> int`: candidates = towns with state 0 and `price > 0` and
+  `town_pop >= 1.0`; if `gold[s] < _buy_floor()` the candidates narrow to owner `== f` with
+  `town_gold >= _tax_floor()`. Nearest by world distance stack→town centre (strict `<`,
+  so lowest id wins ties). None → -1.
+- `goal_bonus(w, s, weights) -> PackedFloat32Array`: copy of the 7 input weights; if
+  `gold[s] < POOR_GOLD`: `[RAID] += POOR_RAID_BONUS`, `[HUNT_WEAK] += POOR_RAID_BONUS * 0.5`;
+  append `RESTOCK_WEIGHT if wants_restock else 0.0` (index 7) and `0.0` (index 8, FOUND is
+  never drawn). Returns size 9.
+- `restock(w, s, t) -> String`: `f = faction[s]`, `p = price(w, f, t)`; if `p < 0` or state
+  != 0 → return `""`. (1) owner `== f`: `gold[s] += town_gold[t]; town_gold[t] = 0`.
+  (2) heal: alive units of `s` in ascending id with `hp_frac < 1.0`: if `gold[s] >= HEAL_COST`
+  → pay, `hp_frac = 1.0`, `healed += 1`; else stop. (3) `n = mini(int(gold[s] / p),
+  mini(int(town_pop[t]), STACK_CAP - count[s]))`; add up to `n` units
+  `units.add(f, 0, Kingdoms.recruit_weapon(w, f, w.rng), false, s)` (stop at -1); `added`
+  = successful adds; `count[s] += added; gold[s] -= added * p; town_pop[t] -= added`; if
+  owner != f: `town_gold[t] = minf(TOWN_GOLD_MAX, town_gold[t] + added * p)`. (4) if
+  `added + healed > 0`: `w.bump("restocks")`. Return `"%s restocks at town %d: +%d recruits, %d healed" % [names[s], t, added, healed]`.
+- `loot(w, winners: Array, losers: Array, kills_by_stack: Dictionary)`: if `winners` has no
+  stack with `alive == 1` → return, nothing changes. `pool = Σ_losers gold*LOOT_FRAC`, each
+  loser `gold -= gold*LOOT_FRAC`. Alive winners: `total = Σ count`; share `= pool * count /
+  total` (if `total == 0`: `pool / n_alive_winners`); plus `BOUNTY_PER_KILL *
+  kills_by_stack.get(stack, 0)`.
+- `raid_gold(w, s, t) -> float`: `g = town_gold[t] * RAID_GOLD_FRAC`; `town_gold[t] -= g;
+  gold[s] += g`; return `g`.
+
+### 17.4 Heroes (`scripts/world/heroes.gd`, `class_name Heroes`, static)
+
+- `check_promote(w, u, slew_leader: bool) -> bool`: false if `alive == 0`, `hero == 1` or
+  `is_captain == 1`. If `kills >= HERO_KILLS` or `rank >= LEGEND_RANK` or `slew_leader` →
+  `promote(w, u)`, true. Else false.
+- `promote(w, u)`: draws in order `ambition[u] = w.rng.randf()`, `base =
+  NameGen.captain_name_base(w.rng)`, `adj = NameGen.hero_epithet(w.rng)`. `hero = 1`,
+  `career_start = w.time`, `dynasty[u] = [base, 1]`, `names[u] = "%s the %s" % [base, adj]`.
+  Log `"%s rises from the ranks of %s" % [names[u], stack name or "the wilds" if stack < 0]`;
+  `w.bump("promotions")`.
+- `defect_chance(w, u) -> float`: `f = faction[u]`, `cap = captain_unit[stack[u]]`;
+  `outshine = 1.0 if cap >= 0 and kills[u] > kills[cap] else 0.0`;
+  `clampf(DEFECT_BASE + DEFECT_AMBITION*ambition - DEFECT_COHESION*(ktrait(f,4)-0.5)
+  - DEFECT_PIETY*(ktrait(f,3)-0.5) + DEFECT_OUTSHINE*outshine, 0.05, 0.95)`.
+- `check_breakaway(w)` (once per world second): `n0 = units.n`; for `u` in `0..n0-1`
+  ascending, eligible when `alive == 1, hero == 1, is_captain == 0, fate == ACTIVE`,
+  `s = stack[u] >= 0`, `stacks.alive[s] == 1`, `state[s]` IDLE or MOVING,
+  `count[s] >= BREAKAWAY_MIN_STACK`, `w.time - career_start[u] >= BREAKAWAY_DELAY`
+  (evaluated at that moment, so earlier breakaways this pass count). Eligible →
+  `if w.rng.randf() < BREAKAWAY_RATE: breakaway(w, u)`.
+- `breakaway(w, u, force_defect := -1) -> int` (new stack id, or -1 with no change and no
+  draws when `stacks.n >= stacks.cap`). `force_defect` 0/1 overrides the roll's result in
+  step 4 (the roll is still drawn); -1 uses it. Only tests pass it.
+  1. `s = stack[u]`, `f = faction[s]`, `c = count[s]`, `parent_cap = captain_unit[s]`.
+  2. `want = mini(maxi(int(round(c*FOLLOW_FRAC + kills[u]*FOLLOW_PER_KILL)), BREAKAWAY_MIN_FOLLOWERS), c / 2)`.
+  3. pool = alive units of `s`, `is_captain == 0`, `hero == 0`, ascending id. Partial
+     Fisher–Yates: for `k` in `0..mini(want, pool.size())-1`: `j = w.rng.randi_range(k, pool.size()-1)`, swap `k,j`. Followers = first `mini(want, pool.size())`.
+  4. `defect = w.rng.randf() < defect_chance(w, u)`. `g = f`; if defect: `g2 =
+     Kingdoms.new_faction(w, f)`; if `g2 != -1`: `g = g2`, `w.add_relation(f, g, DEFECT_RELATION)`.
+     (`defect` with `g2 == -1` behaves as loyal.)
+  5. Tile: first of `World._passable_neighbours(w.map, stack_tile(s))`, else `stack_tile(s)`.
+     `ns = stacks.add(g, centre.x, centre.y, NameGen.stack_name(w.rng))`.
+  6. `u` and followers: `stack = ns`, `faction = g`. `is_captain[u] = 1`, `mentor[u] =
+     parent_cap`, `captain_unit[ns] = u`.
+  7. `moved = followers.size() + 1`; `share = gold[s] * moved / c`; `gold[s] -= share;
+     gold[ns] += share`. `stacks.recount(units)`.
+  8. `immunity[ns] = RETREAT_IMMUNITY`; if `g != f` also `immunity[s] = RETREAT_IMMUNITY`.
+  9. Loyal: log `"%s leaves %s with %d men" % [names[u], stacks.names[s], followers.size()]`,
+     `bump("breakaways")`. Defected: log `"%s breaks from %s, founding the free company %s"
+     % [names[u], faction_names[f], faction_names[g]]`, `bump("breakaways")` and `bump("defections")`.
+- `successor(w, u, last_stack) -> int` (follow legacy):
+  1. `u >= 0`, `alive == 1`, `fate == ACTIVE`, `stack >= 0` → `u`.
+  2. `0 <= last_stack < stacks.n`, `stacks.alive == 1`, `c = captain_unit[last_stack]`,
+     `c >= 0`, `c != u`, `alive[c] == 1` → `c`.
+  3. alive, ACTIVE, `stack >= 0`, `mentor == u`: most kills, strict `>` ascending id → that unit.
+  4. `-1`.
+
+### 17.5 Settling (`scripts/world/settling.gd`, `class_name Settling`, static) + Lineage
+
+Lineage edits: `make_captain` also sets `career_start[u] = w.time`.
+`_succeed(w, stack, dead)` becomes `succeed(w, stack, old_captain, verb := "fell")`
+(keep `_succeed` as a one-line wrapper); log `"%s %s %s; %s rises" % [name,
+numeral(old), verb, names[heir]]`; heir also gets `career_start = w.time`.
+
+- `found_site(w, s) -> Vector2i`: `o = stack_tile(s)`; for `r` in `0..FOUND_SEARCH`: tiles
+  with Chebyshev distance exactly `r` from `o`, scanned `ty` ascending then `tx` ascending;
+  first tile that is in bounds, `kind == PLAINS`, and Chebyshev `>= FOUND_MIN_SPACING` from
+  every entry of `w.towns`. None → `Vector2i(-1, -1)`.
+- `check_aging(w)` (once per world second), `n0 = stacks.n`, `s` ascending: skip unless
+  `stacks.alive == 1`, `state != BATTLE`, `cap = captain_unit >= 0`, `units.alive[cap] == 1`.
+  `age = w.time - career_start[cap]`.
+  1. `goal == FOUND`: if `age >= HERO_LIFESPAN + FOUND_GRACE` → `retire`. Else if `state ==
+     IDLE`: at `(goal_tx, goal_ty)` → `found_town`; else re-path there (`Pathing.find`;
+     empty → `retire`; else `path, path_i = 0, state = MOVING`). Continue.
+  2. `age < HERO_LIFESPAN` → continue.
+  3. `score = gold + count * FOUND_UNIT_VALUE`. If `score >= FOUND_SCORE` and `site =
+     found_site != (-1,-1)`: at site → `found_town(w, s, site)`; else path non-empty →
+     `goal = FOUND, goal_tx/ty = site, path, path_i = 0, state = MOVING`. Otherwise → `retire(w, s)`.
+- `found_town(w, s, tile) -> int`: `f = faction[s]`, `cap = captain_unit[s]`. Guard: if
+  `w.town_at(tile) != -1` or any town is within Chebyshev `< FOUND_MIN_SPACING` → return -1,
+  no change. `cap < 0` → steps 4–5 use the stack name in the log and skip lord/succession.
+  1. Owner: if any `town_owner == f` → `f`. Else `o = map.owner[idx(tile)]`; if `o >= 0,
+     o != f, w.allied(f, o)` → `o`; else `f`.
+  2. `t = w.add_town(tile, owner)`; `town_gold[t] = minf(TOWN_GOLD_MAX, gold[s])`; `gold[s] = 0`;
+     `town_lord[t] = cap`.
+  3. `owner != f`: `stacks.faction[s] = owner` and every unit with `stack == s` → `faction = owner`.
+  4. Log `"%s settles at (%d,%d), founding a town of %s" % [names[cap], x, y,
+     faction_names[owner]]`; `bump("foundings")`.
+  5. `fate[cap] = LORD; is_captain[cap] = 0; units.stack[cap] = -1`;
+     `Lineage.succeed(w, s, cap, "settles")`.
+  6. `goal = DEFEND, state = IDLE, idle_timer = FOUND_IDLE, path = empty, path_i = 0`;
+     `stacks.recount(units)`; `Kingdoms.on_event(w, "settle", owner)`;
+     `w.recompute_borders()`; `w.pathing.refresh(w.map)`. Return `t`.
+- `retire(w, s)`: `cap < 0` → return. Log `"%s retires" % names[cap]`; `bump("retirements")`;
+  `fate = RETIRED, is_captain = 0, stack = -1`; `Lineage.succeed(w, s, cap, "retires")`;
+  `goal = IDLE_HEAL, state = IDLE`; `stacks.recount(units)`.
+
+### 17.6 Kingdoms: slot recycling
+
+- `has_free_slot(w) -> bool`: some `f < faction_count` with `faction_alive == 0`, or
+  `faction_count < MAX_FACTIONS_WORLD`.
+- `new_faction(w, from_f) -> int`: `g` = lowest `f < faction_count` with `faction_alive == 0`;
+  else `faction_count` (then `faction_count += 1`) if `< MAX_FACTIONS_WORLD`; else return -1
+  with no change and no draws. Reset `g`: `faction_alive = 1`, `faction_color = g %
+  FACTION_COLORS.size()`, name drawn exactly as before (grow `faction_names` to `g+1` with
+  `""` if short, then assign index `g`), ktraits copied from `from_f` with cohesion
+  `KTRAIT_INIT`, `relations[g*M+b] = relations[b*M+g] = 0.0` for all `b`, `split_cooldown[g]
+  = 0.0`, plinko row/bias/order as before (same draw order: name, then shuffle).
+- `check_split`: replace the `faction_count >= MAX_FACTIONS_WORLD` guard with `not has_free_slot(w)`.
+- Loops over faction slots in `Kingdoms.tick`, `goal_weights` and
+  `WorldSim._most_hated_faction` run to `w.faction_count`, not `MAX_FACTIONS_WORLD`
+  (slots above `faction_count` are never used; indexing still uses `MAX_FACTIONS_WORLD`).
+
+### 17.7 World.create population
+
+`WorldGen.generate(m, town_count := -1)`: `-1` keeps the old formula; else places `town_count`.
+
+`World.create(seed)`:
+1. `map` as before. `pop = RandomNumberGenerator.new(); pop.seed = seed + 2`;
+   `kingdoms = pop.randi_range(KINGDOMS_MIN, KINGDOMS_MAX)`; `companies =
+   pop.randi_range(COMPANIES_MIN, COMPANIES_MAX)`; `n_towns = pop.randi_range(maxi(TOWNS_MIN,
+   kingdoms), TOWNS_MAX)`; `companies = mini(companies, MAX_FACTIONS_WORLD - kingdoms)`.
+2. `town_tiles = WorldGen.generate(map, n_towns)`; `kingdoms = mini(kingdoms, town_tiles.size())`.
+   Towns `ti < kingdoms` owned by `ti`, rest neutral. `faction_count = kingdoms + companies`.
+3. `w.rng` seed+1. Kingdom stacks exactly as before for `fi < kingdoms`; each stack `gold =
+   KINGDOM_STACK_GOLD`; after `make_captain`: `career_start[cap] = -w.rng.randf() *
+   HERO_LIFESPAN * START_AGE_SPREAD`.
+4. Companies `ci` ascending, `f = kingdoms + ci`: up to 200 tries of `tx =
+   w.rng.randi_range(0, cols-1)`, `ty = w.rng.randi_range(0, rows-1)`; accept when `kind ==
+   PLAINS`, Chebyshev `>= COMPANY_SPAWN_MIN_DIST` from every town, and `w.pathing.find(tile,
+   town_tiles[0]).size() > 0`. No accept → first `_passable_neighbours` of
+   `town_tiles[ci % town_tiles.size()]`, else that town tile. Stack named
+   `NameGen.stack_name`; `randi_range(COMPANY_UNITS_MIN, COMPANY_UNITS_MAX)` rank-0 units,
+   weapon `randi_range(0, 4)`; captain rank 1 sword via `make_captain(captain_name_base)`;
+   then `hero[cap] = 1`, `ambition[cap] = w.rng.randf()`, `career_start[cap] =
+   -w.rng.randf() * HERO_LIFESPAN * START_AGE_SPREAD`; `gold = COMPANY_START_GOLD`; `count` set.
+   (`w.pathing` must exist before this step.)
+5. Plinko profiles, names, alive flags, colours loop to `faction_count` (`% FACTION_COLORS.size()`).
+
+### 17.8 Hookup
+
+`WorldSim.step_world`: after `TownSim.step`: `Economy.accrue(w, dt)`. In the per-second
+block after `check_death`: `Heroes.check_breakaway(w)`, then `Settling.check_aging(w)`.
+Goal-pick loop skips stacks with `goal == FOUND`.
+`pick_goal`: `weights = Economy.goal_bonus(w, i, Kingdoms.goal_weights(w, fi))`.
+`set_goal`: `RESTOCK` → `t = Economy.restock_target`; -1 → false; if the stack already stands
+on town `t`'s tile → `Economy.restock(w, i, t)`, `goal = IDLE_HEAL`, `state = IDLE`, return
+true; else path as other goals. `FOUND` → false.
+`move_stacks` path end (both places): after `state = IDLE`: `PILGRIMAGE` → pilgrim event (as
+now); `RESTOCK` → `t = w.town_at(tile)`, `t != -1` → `Economy.restock`, then `goal = IDLE_HEAL`;
+`FOUND` → tile `== (goal_tx, goal_ty)` → `Settling.found_town(w, i, tile)`.
+`step_battles` event loop: `KILL` with `ev[1] != -1`: `vu = unit_of[ev[2]]`; if
+`is_captain[vu] == 1 or hero[vu] == 1` → `inst.slayers.append(unit_of[ev[1]])`.
+
+`BattleBridge.finish`: in the copy-back loop, before overwriting kills,
+`kills_gain[units.stack[u]] += state.kills[i] - units.kills[u]`; `Lineage.check_legend` is no
+longer called. After `stacks.recount`: for marbles ascending, `u` alive →
+`Heroes.check_promote(world, u, inst.slayers.has(u))`. After the winner/loser loop, when
+`winner_side != -1`: `Economy.loot(world, winner_stacks, loser_stacks, kills_gain)`.
+`_process_rebirth`: founder path only when `new_faction` returns `!= -1` (call it only after
+the founder and ruin checks pass); `-1` → mercenary path.
+
+`PlinkoOutcomes._raid` / `_raze`: once a target town is chosen, `Economy.raid_gold(w, stack,
+t)` before its pop/state changes. Log lines unchanged.
+
+### 17.9 Follow + panels (scene)
+
+`world_scene.gd`: `followed_unit := -1`, `followed_stack := -1`. Key `F`: if following →
+stop; else if the spectate panel shows stack `s` with `captain_unit >= 0` → follow it.
+Each `_process` after stepping: `nu = Heroes.successor(world, followed_unit, followed_stack)`;
+`-1` → `world.log_event("The tale of %s ends" % name)`, stop; `nu != followed_unit` →
+`world.log_event("The tale passes to %s" % names[nu])`; `followed_unit = nu`,
+`followed_stack = units.stack[nu]`, `camera.position` = that stack's position, spectate
+panel shows that stack. Label (top centre) `"Following: <name> — <stack label>"`, hidden
+when not following. Spectate panel adds `Gold`, captain `Age <s>/<HERO_LIFESPAN>`, hero
+count, and `Free company` when the faction owns no town. Map layer draws a gold ring on
+towns with `town_lord >= 0`. `terrain_layer` colour index uses `% FACTION_COLORS.size()`.
+
+## 18. Battle aftermath (watched battles only)
+
+Purely cosmetic; changes no world state and no determinism.
+
+- `BattleSim.integrate(s, dt, apply_hazards: bool)`: §5 step 6 (forces →
+  velocity, slope/friction, speed clamp, move, walls, obstacles) extracted
+  from `step`; hazard damage runs only when `apply_hazards`. `step` calls it
+  with `true` (behaviour unchanged); tower ownership/aura stays in `step`.
+- `BattleAftermath` (`scripts/render/battle_aftermath.gd`, RefCounted):
+  `_init(state, sim, winner_side)` (`winner_side` = `BattleSim.winner`,
+  `< 0` stalemate), `step(dt)`, `static banner_lines(inst, world, side) ->
+  [title, subtitle]`. Roles: celebrant = `faction_id == winner`; fleer = not
+  celebrant and (winner >= 0 or state RETREAT); stalemate ENGAGE marbles
+  idle. At init every live fleer, in index order, takes up to
+  `CHASERS_PER_FLEER` nearest unassigned non-captain celebrants within
+  `CHASE_RANGE`. Per step: pin `bump_cd = NO_DAMAGE_CD`; chasers drive at
+  their fleer until `CHASE_TIME` or it is gone; other celebrants (not the
+  captain) orbit the live winning captain, else the celebrants' start
+  centroid, on a ring radius fixed at first orbit tick to
+  `clamp(dist, RING_MIN_MULT * rally radius, RING_BASE + RING_PER_SQRT *
+  sqrt(celebrants))`; celebrants twirl `weapon_angle` and pulse `spin`
+  (glow only); fleers drive toward `HOME_DIR` and become `DEAD` + `fled` at
+  the home edge. Then `sim.integrate(s, dt, false)`, `sim.fine.build`,
+  `Collision.resolve`, `boost_cd` decay, `tick += 1`. `Weapons.tick` never
+  runs. Drives use the Forces step 5 cap pattern. Constants live in the
+  class, not `Tuning`.
+- `BattleView`: `_process` starts the aftermath when
+  `not world.battles.has(inst)`; steps it at `Tuning.DT` on real frame time
+  (≤ 4 steps/frame, skipped while `paused`, mirrored from `world_scene`
+  each frame); shows a top banner (title in the winner's palette colour,
+  winning stack names, close hint). `open`/`close` end any aftermath.
+  Captain labels hide once the captain is `DEAD`.
+
+## 19. Rally and contingents
+
+Stacks merge by choice. Tuning `RALLY_*` (see docs/systems/06).
+
+- Fields: `Units.leader` (-1 = the stack's own men, else unit id of the hero
+  whose contingent the unit is), `Units.pledge_t` (world time before which a
+  rallied hero will not break away); `Stacks.rally_target` (-1 / host),
+  `Stacks.rally_cd` (seconds, decremented in `step_world`). `Stacks.Goal.RALLY
+  = 9`. All four saved; older saves load with defaults (`SAVE_VERSION`
+  unchanged).
+- `Rally` (`scripts/world/rally.gd`, static):
+  - `desire(w, s, host, threat) -> 0..1`: leaderless -> 1; else
+    `W_WEAK*(1 - count/WEAK_COUNT) + W_THREAT*threat + W_RENOWN*clamp(gap/RENOWN_SCALE)
+    + W_COHESION*(coh - 0.5) - W_AMBITION*ambition - W_AGGR*(aggr - 0.5)
+    - W_GOLD*clamp(gold/GOLD_SCALE)`, clamped; renown = kills + 10*rank.
+  - `threat(w, s)`: non-allied enemy men within `RALLY_THREAT_TILES` /
+    own count / `RALLY_THREAT_RATIO`, clamped 0..1.
+  - `can_host(w, host, s)`: alive, same faction, live captain, IDLE/MOVING,
+    goal != RALLY, `count sum <= STACK_CAP`, strictly bigger (tie: lower id).
+  - `best_host(w, s)`: `-1` on `rally_cd > 0`; else highest desire among
+    hosts within `RALLY_RANGE` (Chebyshev), ties nearest then lowest id.
+  - `goal_weight(w, s)`: appended to `pick_goal` weights at index RALLY: 0
+    without host; leaderless `RALLY_LEADERLESS_WEIGHT`; else
+    `RALLY_GOAL_WEIGHT * desire` if `desire >= RALLY_MIN_DESIRE`.
+  - `host_accepts(w, host, s)`: leaderless -> true (no draw); else one
+    `w.rng.randf() < clamp(BASE + trait bonus - rival penalty)`; TYRANT
+    +TRAIT, CAUTIOUS +TRAIT*(1 - count/STACK_CAP), BUILDER
+    +TRAIT*clamp(joiner gold/GOLD_SCALE), RIVAL when joiner renown > host's.
+  - `merge(w, host, s)`: alive units move; led joiner's men with leader -1
+    get leader = its captain; captain -> `is_captain 0, hero 1, leader -1,
+    pledge_t = time + PLEDGE_TIME`, keeps name/dynasty; leaderless joiner's
+    men get leader -1. Gold moves, `reinforce.erase(s)`, recount, `s` dies.
+    Logs "<captain> brings <stack> (<n>) under <host>" / "<stack> (<n>)
+    folds into <host>".
+  - `arrive(w, s)`: clears target, goal IDLE_HEAL; host still hostable and
+    within 1 tile -> accept ? merge : `rally_cd = RALLY_COOLDOWN` + log
+    "<host> turns away <stack>".
+- `WorldSim.set_goal(RALLY)`: host = `best_host`; within 1 tile -> `arrive`
+  now; else path to the host's tile. `_on_arrive(RALLY)` -> `Rally.arrive`.
+- `Heroes`: `check_breakaway` skips `time < pledge_t`. `breakaway` takes the
+  hero's contingent (alive units of the stack with `leader == u`) as
+  followers with no rng draws when it has any, else the old random draw;
+  movers get `leader = -1`.

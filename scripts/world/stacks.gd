@@ -2,7 +2,7 @@ class_name Stacks extends RefCounted
 ## Marching unit stacks on the overworld. SoA per docs/ARCHITECTURE.md §11.3.
 
 enum State { IDLE = 0, MOVING = 1, BATTLE = 2, RETREATING = 3 }
-enum Goal { HUNT_WEAK = 0, EXPAND = 1, RAID = 2, DEFEND = 3, IDLE_HEAL = 4, PILGRIMAGE = 5, AVENGE = 6 }
+enum Goal { HUNT_WEAK = 0, EXPAND = 1, RAID = 2, DEFEND = 3, IDLE_HEAL = 4, PILGRIMAGE = 5, AVENGE = 6, RESTOCK = 7, FOUND = 8, RALLY = 9 }
 
 var n: int = 0
 var cap: int
@@ -25,6 +25,9 @@ var path: Array = []                # per stack: PackedVector2Array
 var path_i: PackedInt32Array
 var names: Array = []               # per stack: String
 var alive: PackedByteArray
+var gold: PackedFloat32Array         # 0.0 (M9)
+var rally_target: PackedInt32Array   # -1; host stack a RALLY march is heading to (§19)
+var rally_cd: PackedFloat32Array     # 0.0; seconds before a refused stack may rally again (§19)
 
 
 func _init(capacity: int) -> void:
@@ -48,6 +51,9 @@ func _init(capacity: int) -> void:
 	idle_timer.resize(capacity)
 	path_i.resize(capacity)
 	alive.resize(capacity)
+	gold.resize(capacity)
+	rally_target.resize(capacity)
+	rally_cd.resize(capacity)
 
 	x.fill(0.0)
 	y.fill(0.0)
@@ -66,6 +72,9 @@ func _init(capacity: int) -> void:
 	idle_timer.fill(0.0)
 	path_i.fill(0)
 	alive.fill(0)
+	gold.fill(0.0)
+	rally_target.fill(-1)
+	rally_cd.fill(0.0)
 
 	path = []
 	names = []
@@ -90,6 +99,9 @@ func add(faction_: int, x_: float, y_: float, name_: String) -> int:
 	ai_timer[idx] = 0.0
 	immunity[idx] = 0.0
 	idle_timer[idx] = 0.0
+	gold[idx] = 0.0
+	rally_target[idx] = -1
+	rally_cd[idx] = 0.0
 	path.append(PackedVector2Array())
 	path_i[idx] = 0
 	names.append(name_)

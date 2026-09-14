@@ -87,7 +87,21 @@ running the full physics sim every tick.
    `scripts/world/world_sim.gd::_nearest_stack_of_faction`). A path is fetched
    with `Pathing.find`; no reachable target → `false`, and
    `scripts/world/world_sim.gd::pick_goal` falls back to `IDLE_HEAL`/IDLE this
-   tick (see Gotchas).
+   tick (see Gotchas). `RALLY` → march to a bigger same-faction army and ask to
+   join it (below).
+2b. Rally and contingents (`scripts/world/rally.gd`). The RALLY weight comes
+   from `scripts/world/rally.gd::goal_weight`: a captainless stack with a host
+   in range almost always picks it; a led stack weighs its
+   `scripts/world/rally.gd::desire` — few men, nearby enemies and a more
+   renowned host captain pull toward joining, the captain's ambition, kingdom
+   aggression and gold in hand pull against. On arrival
+   `scripts/world/rally.gd::arrive` asks the host captain
+   (`scripts/world/rally.gd::host_accepts`: TYRANT absorbs readily, CAUTIOUS
+   wants numbers, BUILDER wants gold, a more renowned joiner is a rival).
+   Accepted → `scripts/world/rally.gd::merge`: the joiner's men become a
+   contingent (`Units.leader` = their captain), the captain serves on as a
+   hero, pledged for `RALLY_PLEDGE_TIME`, after which a breakaway takes exactly
+   that contingent. Refused → `RALLY_COOLDOWN`.
 3. `Pathing` (`scripts/world/pathing.gd`) wraps `AStarGrid2D`: `region` is the
    map's tile rect, `cell_size = Vector2(TILE, TILE)`, diagonals only when no
    obstacle blocks the corner, weight scale = `cost_at`. `find` returns tile

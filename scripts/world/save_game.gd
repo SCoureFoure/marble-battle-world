@@ -47,6 +47,13 @@ static func save(w: World, path: String) -> Error:
 		"c_settles": w.units.c_settles,
 		"dynasty": w.units.dynasty,
 		"names": w.units.names,
+		"hero": w.units.hero,
+		"career_start": w.units.career_start,
+		"ambition": w.units.ambition,
+		"mentor": w.units.mentor,
+		"fate": w.units.fate,
+		"leader": w.units.leader,
+		"pledge_t": w.units.pledge_t,
 	})
 
 	# Live battles are not persisted: a stack caught in BATTLE is written as
@@ -83,6 +90,9 @@ static func save(w: World, path: String) -> Error:
 		"path_i": w.stacks.path_i,
 		"names": w.stacks.names,
 		"alive": w.stacks.alive,
+		"gold": w.stacks.gold,
+		"rally_target": w.stacks.rally_target,
+		"rally_cd": w.stacks.rally_cd,
 	})
 
 	f.store_var({
@@ -92,6 +102,8 @@ static func save(w: World, path: String) -> Error:
 		"town_pop": w.town_pop,
 		"town_recruit": w.town_recruit,
 		"town_timer": w.town_timer,
+		"town_gold": w.town_gold,
+		"town_lord": w.town_lord,
 	})
 
 	f.store_var({
@@ -111,6 +123,7 @@ static func save(w: World, path: String) -> Error:
 		"events_log": w.events_log,
 		"plinko_log": plinko_log_trimmed,
 		"scars": w.scars,
+		"history": w.history,
 	})
 
 	f.close()
@@ -170,6 +183,15 @@ static func load(path: String) -> World:
 	w.units.c_settles = units_dict["c_settles"]
 	w.units.dynasty = units_dict["dynasty"]
 	w.units.names = units_dict["names"]
+	w.units.hero = units_dict["hero"]
+	w.units.career_start = units_dict["career_start"]
+	w.units.ambition = units_dict["ambition"]
+	w.units.mentor = units_dict["mentor"]
+	w.units.fate = units_dict["fate"]
+	# §19 fields; older saves lack them and keep Units.new defaults.
+	if units_dict.has("leader"):
+		w.units.leader = units_dict["leader"]
+		w.units.pledge_t = units_dict["pledge_t"]
 
 	w.stacks = Stacks.new(int(stacks_dict["cap"]))
 	w.stacks.n = stacks_dict["n"]
@@ -192,6 +214,10 @@ static func load(path: String) -> World:
 	w.stacks.path_i = stacks_dict["path_i"]
 	w.stacks.names = stacks_dict["names"]
 	w.stacks.alive = stacks_dict["alive"]
+	w.stacks.gold = stacks_dict["gold"]
+	if stacks_dict.has("rally_target"):
+		w.stacks.rally_target = stacks_dict["rally_target"]
+		w.stacks.rally_cd = stacks_dict["rally_cd"]
 
 	w.towns = towns_dict["towns"]
 	w.town_owner = towns_dict["town_owner"]
@@ -199,6 +225,8 @@ static func load(path: String) -> World:
 	w.town_pop = towns_dict["town_pop"]
 	w.town_recruit = towns_dict["town_recruit"]
 	w.town_timer = towns_dict["town_timer"]
+	w.town_gold = towns_dict["town_gold"]
+	w.town_lord = towns_dict["town_lord"]
 
 	w.ktraits = meta_dict["ktraits"]
 	w.relations = meta_dict["relations"]
@@ -213,6 +241,7 @@ static func load(path: String) -> World:
 	w.events_log = logs_dict["events_log"]
 	w.plinko_log = logs_dict["plinko_log"]
 	w.scars = logs_dict["scars"]
+	w.history = logs_dict["history"]
 
 	# Live battles are never persisted (see save()): the loaded world starts
 	# with none in flight.

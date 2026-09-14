@@ -208,6 +208,32 @@ constant without updating the matching assertion turns that test red.
 | `SPLIT_UNITS` | `600` | kingdoms.gd | test_tuning | Total alive-unit threshold above which a faction can split into a new kingdom. |
 | `SPLIT_COHESION` | `0.3` | kingdoms.gd | - | Cohesion trait threshold at/above which a faction is eligible to split. |
 
+## Rally and contingents
+
+| Constant | Value | Read by | Pinned by test | What it does |
+|---|---|---|---|---|
+| `RALLY_RANGE` | `8` | rally.gd | - | Max Chebyshev tile distance to a host army a stack will consider rallying to. |
+| `RALLY_MIN_DESIRE` | `0.2` | rally.gd | - | Join desire below which a led stack gives the RALLY goal no weight. |
+| `RALLY_GOAL_WEIGHT` | `6.0` | rally.gd | - | RALLY goal weight at desire 1.0 (scaled by desire) for a stack with a captain. |
+| `RALLY_LEADERLESS_WEIGHT` | `50.0` | rally.gd | - | RALLY goal weight for a captainless stack with a host in range (near-certain pick). |
+| `RALLY_WEAK_COUNT` | `30.0` | rally.gd | - | Unit count at/above which a stack no longer feels weak; the weakness term fades linearly to it. |
+| `RALLY_THREAT_TILES` | `6` | rally.gd | - | Tile radius in which enemy (non-allied) men count as a threat. |
+| `RALLY_THREAT_RATIO` | `3.0` | rally.gd | - | Enemy-to-own men ratio that makes the threat term full strength. |
+| `RALLY_RENOWN_SCALE` | `20.0` | rally.gd | - | Renown gap (kills + 10 x rank) between host and joiner captains giving the full renown term. |
+| `RALLY_GOLD_SCALE` | `60.0` | rally.gd | - | Gold at which the joiner's "can manage alone" term (and BUILDER host's gold appetite) is full. |
+| `RALLY_W_WEAK` | `0.5` | rally.gd | - | Desire weight of having few men. |
+| `RALLY_W_THREAT` | `0.4` | rally.gd | - | Desire weight of nearby enemy strength. |
+| `RALLY_W_RENOWN` | `0.2` | rally.gd | - | Desire weight of the host captain's greater (or lesser, negative) renown. |
+| `RALLY_W_COHESION` | `0.4` | rally.gd | - | Desire weight of kingdom cohesion above/below 0.5. |
+| `RALLY_W_AMBITION` | `0.5` | rally.gd | - | Desire penalty per unit of the joiner captain's ambition. |
+| `RALLY_W_AGGR` | `0.3` | rally.gd | - | Desire penalty for kingdom aggression above 0.5. |
+| `RALLY_W_GOLD` | `0.2` | rally.gd | - | Desire penalty for gold in hand. |
+| `RALLY_ACCEPT_BASE` | `0.5` | rally.gd | - | Host captain's base chance to accept a led joiner. |
+| `RALLY_ACCEPT_TRAIT` | `0.3` | rally.gd | - | Acceptance bonus: full for TYRANT, scaled by free room for CAUTIOUS, by joiner gold for BUILDER. |
+| `RALLY_ACCEPT_RIVAL` | `0.3` | rally.gd | - | Acceptance penalty when the joiner's captain out-renowns the host's. |
+| `RALLY_COOLDOWN` | `60.0` | rally.gd | - | Seconds a refused stack waits before it may rally again. |
+| `RALLY_PLEDGE_TIME` | `300.0` | rally.gd, heroes.gd | - | Seconds a captain who rallied in serves as a hero before they may break away with their contingent. |
+
 ## Presentation and time
 
 | Constant | Value | Read by | Pinned by test | What it does |

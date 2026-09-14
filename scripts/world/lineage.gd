@@ -20,11 +20,12 @@ static func numeral(n: int) -> String:
 
 
 ## Captain creation everywhere goes through this: sets dynasty [name_base, 1]
-## and names[u] = name_base + " I".
+## and names[u] = name_base + " I". career_start = w.time (M9).
 static func make_captain(w: World, u: int, name_base: String) -> void:
 	w.units.is_captain[u] = 1
 	w.units.dynasty[u] = [name_base, 1]
 	w.units.names[u] = name_base + " I"
+	w.units.career_start[u] = w.time
 
 
 ## Called by the bridge copy-back when rank becomes LEGEND_RANK.
@@ -101,10 +102,11 @@ static func on_battle_finished(w: World, inst: BattleInstance, result: Dictionar
 			_succeed(w, stack, captain_before)
 
 
-## Heir = alive unit of `stack`, not the (already dead) captain, with the
-## most kills; ties -> lowest id. No candidate -> captain_unit = -1 (the
-## stack dies anyway once its count reaches 0).
-static func _succeed(w: World, stack: int, dead_captain: int) -> void:
+## Heir = alive unit of `stack`, not the (already dead/retired) captain, with
+## the most kills; ties -> lowest id. No candidate -> captain_unit = -1 (the
+## stack dies anyway once its count reaches 0). `verb` customises the log
+## line ("fell" on combat death; Settling passes "retires" / "settles").
+static func succeed(w: World, stack: int, old_captain: int, verb: String = "fell") -> void:
 	var best := -1
 	var best_kills := -1
 	for u in range(w.units.n):
@@ -117,21 +119,27 @@ static func _succeed(w: World, stack: int, dead_captain: int) -> void:
 		w.stacks.captain_unit[stack] = -1
 		return
 
-	var dyn: Array = w.units.dynasty.get(dead_captain, ["", 0])
+	var dyn: Array = w.units.dynasty.get(old_captain, ["", 0])
 	var name: String = dyn[0]
 	var old_numeral: int = int(dyn[1])
 	var new_numeral := old_numeral + 1
 
 	w.units.is_captain[best] = 1
-	w.units.rank[best] = maxi(1, w.units.rank[dead_captain] - Tuning.HEIR_RANK_DROP)
-	w.units.xp[best] = w.units.xp[dead_captain] / 2
-	w.units.ctrait[best] = w.units.ctrait[dead_captain]
+	w.units.rank[best] = maxi(1, w.units.rank[old_captain] - Tuning.HEIR_RANK_DROP)
+	w.units.xp[best] = w.units.xp[old_captain] / 2
+	w.units.ctrait[best] = w.units.ctrait[old_captain]
 	w.units.c_fights[best] = 0
 	w.units.c_retreats[best] = 0
 	w.units.c_razes[best] = 0
 	w.units.c_settles[best] = 0
+	w.units.career_start[best] = w.time
 	w.units.dynasty[best] = [name, new_numeral]
 	w.units.names[best] = "%s %s" % [name, numeral(new_numeral)]
 	w.stacks.captain_unit[stack] = best
 
-	w.log_event("%s %s fell; %s rises" % [name, numeral(old_numeral), w.units.names[best]])
+	w.log_event("%s %s %s; %s rises" % [name, numeral(old_numeral), verb, w.units.names[best]])
+
+
+## One-line wrapper kept for the combat-death call site: verb "fell".
+static func _succeed(w: World, stack: int, dead_captain: int) -> void:
+	succeed(w, stack, dead_captain, "fell")

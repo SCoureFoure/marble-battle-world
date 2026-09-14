@@ -31,7 +31,7 @@ func _init() -> void:
 	t.check(w.units.names[cap_id] == "Toby I", "make_captain: names[0] == Toby I")
 
 	# 3. Blank world: ktraits/relations helpers
-	t.check(w.ktraits.size() == 80, "blank world: ktraits.size() == 80")
+	t.check(w.ktraits.size() == 320, "blank world: ktraits.size() == 320")
 	t.check(t.approx(w.ktrait(0, 4), 0.5), "blank world: ktrait(0, 4) approx 0.5")
 	w.add_ktrait(0, 4, 0.7)
 	t.check(t.approx(w.ktrait(0, 4), 1.0), "add_ktrait(0, 4, 0.7) -> ktrait(0, 4) == 1.0 (clamped)")
@@ -49,7 +49,7 @@ func _init() -> void:
 
 	# 4. World.create(42): faction fields + captain naming + determinism
 	var w1 := World.create(42)
-	t.check(w1.faction_names.size() == 6, "World.create: faction_names.size() == 6")
+	t.check(w1.faction_names.size() == w1.faction_count, "World.create: faction_names.size() == faction_count")
 	var suffixes := ["ia", "mark", "land", "gard"]
 	var names_ok := true
 	for name in w1.faction_names:
@@ -63,7 +63,7 @@ func _init() -> void:
 			names_ok = false
 	t.check(names_ok, "World.create: faction_names non-empty, ending with a kingdom suffix")
 	t.check(w1.faction_alive[0] == 1, "World.create: faction_alive[0] == 1")
-	t.check(w1.faction_alive[6] == 0, "World.create: faction_alive[6] == 0")
+	t.check(w1.faction_alive[w1.faction_count] == 0, "World.create: faction_alive[faction_count] == 0")
 	t.check(w1.faction_color[5] == 5, "World.create: faction_color[5] == 5")
 
 	var captains_ok := true
