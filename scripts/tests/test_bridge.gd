@@ -53,6 +53,24 @@ func _init() -> void:
 	t.check(inst.state.faction_captain[1] >= 0, "case1 faction_captain[1] >= 0")
 	t.check(inst.sim.terrain == inst.terrain, "case1 sim.terrain == inst.terrain")
 
+	# 1b. unit_of maps marbles to world unit ids even when those ids are not
+	# 0..n-1 (a bystander stack owns the first unit ids).
+	var wb := World.new()
+	wb.setup_blank(12, 8, 7)
+	mk_stack(wb, 2, 1, 1, 9, 0)   # units 0..9, not in the battle
+	var b0 := mk_stack(wb, 0, 5, 4, 5, -1)
+	var b1 := mk_stack(wb, 1, 5, 4, 4, 1)
+	var instb := BattleBridge.start(wb, b0, b1)
+	var mapped_ok := instb.unit_of.size() == instb.state.n
+	for ib in range(instb.unit_of.size()):
+		var ub: int = instb.unit_of[ib]
+		var sb: int = wb.units.stack[ub]
+		if sb != b0 and sb != b1:
+			mapped_ok = false
+		if (wb.units.is_captain[ub] == 1) != (instb.state.is_captain[ib] == 1):
+			mapped_ok = false
+	t.check(mapped_ok, "case1b unit_of[i] is the world unit spawned as marble i")
+
 	var non_plain := false
 	for k in inst.terrain.kind:
 		if k != TerrainGrid.Kind.PLAIN:

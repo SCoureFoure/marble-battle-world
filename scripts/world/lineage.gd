@@ -26,6 +26,7 @@ static func make_captain(w: World, u: int, name_base: String) -> void:
 	w.units.dynasty[u] = [name_base, 1]
 	w.units.names[u] = name_base + " I"
 	w.units.career_start[u] = w.time
+	Looks.ensure(w, u)
 
 
 ## Called by the bridge copy-back when rank becomes LEGEND_RANK.
@@ -136,6 +137,7 @@ static func succeed(w: World, stack: int, old_captain: int, verb: String = "fell
 	w.units.dynasty[best] = [name, new_numeral]
 	w.units.names[best] = "%s %s" % [name, numeral(new_numeral)]
 	w.stacks.captain_unit[stack] = best
+	Looks.ensure(w, best)
 
 	w.log_event("%s %s %s; %s rises" % [name, numeral(old_numeral), verb, w.units.names[best]])
 

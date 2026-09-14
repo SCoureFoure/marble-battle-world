@@ -22,6 +22,7 @@ var c_razes: PackedInt32Array
 var c_settles: PackedInt32Array
 var dynasty: Dictionary = {}        # unit id -> [name: String, numeral: int] (M5)
 var names: Dictionary = {}
+var looks: Dictionary = {}          # unit id -> CharLooks look Dictionary (captains/heroes), kept for life
 var hero: PackedByteArray           # 0 (M9)
 var career_start: PackedFloat32Array # 0.0, world time unit became hero or captain (M9)
 var ambition: PackedFloat32Array     # 0.0 (M9)
@@ -82,6 +83,7 @@ func _init(capacity: int) -> void:
 	pledge_t.fill(0.0)
 
 	names = {}
+	looks = {}
 	dynasty = {}
 
 

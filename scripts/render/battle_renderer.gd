@@ -2,12 +2,26 @@ class_name BattleRenderer
 extends Node2D
 
 const SPARK_POOL := 256
+const UNIT_SHADER := "res://shaders/unit_sprite.gdshader"
+const SPRITE_HALF := 1.4    # sprite half-size = radius * SPRITE_HALF
+const SPRITE_DY := -0.35    # sprite centre offset = radius * SPRITE_DY (feet near the circle's bottom)
+const WALK_RATE := 0.08     # walk-cycle steps per world unit moved
+const IDLE_SPEED := 6.0     # below this speed: keep facing, idle frame
+const WALK_SEQ := [0, 1, 2, 1]
 
 var state: BattleState
 var bodies: MultiMeshInstance2D
 var weapons: MultiMeshInstance2D
 var hp_bars: MultiMeshInstance2D
 var sparks: MultiMeshInstance2D
+var units: MultiMeshInstance2D = null
+var use_sprites: bool = false
+var unit_facing: PackedByteArray = PackedByteArray()
+var unit_anim: PackedFloat32Array = PackedFloat32Array()
+var hero_slots: PackedInt32Array = PackedInt32Array()    # per marble, -1 = faction warrior
+var _hero_looks: Array = []    # looks in slot order
+var _unit_buf: PackedFloat32Array
+var _atlas_dirty: bool = true
 var _buf: PackedFloat32Array
 var _weapon_buf: PackedFloat32Array
 var _hp_buf: PackedFloat32Array
@@ -29,7 +43,10 @@ var _last_tick: int = -1
 var weapon_flash: PackedFloat32Array
 
 # local faction index -> Tuning.FACTION_COLORS index; empty = identity (battle_scene)
-var palette: PackedInt32Array = PackedInt32Array()
+var palette: PackedInt32Array = PackedInt32Array():
+	set(value):
+		palette = value
+		_atlas_dirty = true
 
 
 func _init() -> void:
@@ -63,6 +80,25 @@ func _ready() -> void:
 	mat.shader = load("res://shaders/marble_body.gdshader")
 	bodies.material = mat
 	add_child(bodies)
+
+	use_sprites = ResourceLoader.exists(UNIT_SHADER) and FileAccess.file_exists(CharLooks.BASE + "catalog.json")
+	if use_sprites:
+		units = MultiMeshInstance2D.new()
+		units.name = "Units"
+		var umm := MultiMesh.new()
+		umm.transform_format = MultiMesh.TRANSFORM_2D
+		umm.use_colors = false
+		umm.use_custom_data = true
+		var uq := QuadMesh.new()
+		uq.size = Vector2(2, 2)
+		umm.mesh = uq
+		units.multimesh = umm
+		var umat := ShaderMaterial.new()
+		umat.shader = load(UNIT_SHADER)
+		units.material = umat
+		units.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		add_child(units)
+		bodies.visible = false
 
 	weapons = MultiMeshInstance2D.new()
 	weapons.name = "Weapons"
@@ -189,7 +225,9 @@ static func build_weapon_buffer(s: BattleState, flash: PackedFloat32Array = Pack
 	return buf
 
 
-static func build_hp_buffer(s: BattleState) -> PackedFloat32Array:
+## `head` = how many radii above the centre the body's top edge is: 1.0 for a
+## marble, SPRITE_HALF - SPRITE_DY for a unit sprite (so the bar clears the head).
+static func build_hp_buffer(s: BattleState, head: float = 1.0) -> PackedFloat32Array:
 	var buf := PackedFloat32Array()
 	buf.resize(s.n * 12)
 	for i in range(s.n):
@@ -200,9 +238,73 @@ static func build_hp_buffer(s: BattleState) -> PackedFloat32Array:
 		buf[b] = 0.0 if hidden else r
 		buf[b + 3] = s.px[i]
 		buf[b + 5] = 0.0 if hidden else 1.5
-		buf[b + 7] = s.py[i] - r - 4.0
+		buf[b + 7] = s.py[i] - r * head - 4.0
 		buf[b + 8] = (s.hp[i] / hp_max) if hp_max > 0.0 else 0.0
 	return buf
+
+
+## Facing for a moving marble; `prev` is kept when below IDLE_SPEED.
+## 0 toward camera, 1 left, 2 right, 3 away.
+static func facing_for(vx: float, vy: float, prev: int) -> int:
+	var speed: float = sqrt(vx * vx + vy * vy)
+	if speed < IDLE_SPEED:
+		return prev
+	if absf(vx) >= absf(vy):
+		return 1 if vx < 0.0 else 2
+	return 3 if vy < 0.0 else 0
+
+
+## Walk-cycle frame from accumulated animation distance and current speed.
+static func walk_frame(anim: float, speed: float) -> int:
+	if speed < IDLE_SPEED:
+		return 1
+	return WALK_SEQ[posmod(int(floor(anim)), 4)]
+
+
+static func build_unit_buffer(s: BattleState, facing: PackedByteArray, anim: PackedFloat32Array, slots: PackedInt32Array = PackedInt32Array()) -> PackedFloat32Array:
+	var buf := PackedFloat32Array()
+	buf.resize(s.n * 12)
+	for i in range(s.n):
+		var b := i * 12
+		if s.state[i] == BattleState.State.DEAD:
+			buf[b + 3] = s.px[i]
+			buf[b + 7] = s.py[i]
+			continue
+		var r: float = s.radius[i]
+		var half: float = r * SPRITE_HALF
+		var speed: float = sqrt(s.vx[i] * s.vx[i] + s.vy[i] * s.vy[i])
+		var f: int = facing[i] if i < facing.size() else 0
+		var a: float = anim[i] if i < anim.size() else 0.0
+		var slot: float = float(s.faction_id[i] % UnitAtlas.SLOTS)
+		if i < slots.size() and slots[i] >= 0:
+			slot = float(slots[i])
+		buf[b] = half
+		buf[b + 3] = s.px[i]
+		buf[b + 5] = half
+		buf[b + 7] = s.py[i] + r * SPRITE_DY
+		buf[b + 8] = slot
+		buf[b + 9] = float(f)
+		buf[b + 10] = float(walk_frame(a, speed))
+		buf[b + 11] = 1.0
+	return buf
+
+
+## `by_marble` maps marble index (int) -> look Dictionary. Assigns each look a
+## hero atlas slot (appended after the faction slots) in ascending marble-index
+## order, and points those marbles' `hero_slots` entries at it.
+func set_hero_looks(by_marble: Dictionary) -> void:
+	var keys: Array = by_marble.keys()
+	keys.sort()
+	_hero_looks = []
+	hero_slots.resize(state.n if state != null else (int(keys[-1]) + 1 if keys.size() > 0 else 0))
+	for i in range(hero_slots.size()):
+		hero_slots[i] = -1
+	for key in keys:
+		var k: int = key
+		_hero_looks.append(by_marble[key])
+		if k < hero_slots.size():
+			hero_slots[k] = UnitAtlas.SLOTS + (_hero_looks.size() - 1)
+	_atlas_dirty = true
 
 
 func attach(s: BattleState) -> void:
@@ -210,6 +312,8 @@ func attach(s: BattleState) -> void:
 	bodies.multimesh.instance_count = s.n
 	weapons.multimesh.instance_count = s.n
 	hp_bars.multimesh.instance_count = s.n
+	if units != null:
+		units.multimesh.instance_count = s.n
 	if weapon_flash.size() < s.n:
 		weapon_flash.resize(s.n)
 
@@ -268,6 +372,14 @@ func advance(dt: float) -> void:
 			spark_life[k] = 0.0
 	for k in range(weapon_flash.size()):
 		weapon_flash[k] = maxf(0.0, weapon_flash[k] - dt)
+	if state != null:
+		if unit_facing.size() != state.n:
+			unit_facing.resize(state.n)
+			unit_anim.resize(state.n)
+		for i in range(state.n):
+			var speed: float = sqrt(state.vx[i] * state.vx[i] + state.vy[i] * state.vy[i])
+			unit_facing[i] = facing_for(state.vx[i], state.vy[i], unit_facing[i])
+			unit_anim[i] += speed * dt * WALK_RATE
 
 
 func build_spark_buffer() -> PackedFloat32Array:
@@ -296,13 +408,32 @@ func refresh() -> void:
 		bodies.multimesh.instance_count = state.n
 		weapons.multimesh.instance_count = state.n
 		hp_bars.multimesh.instance_count = state.n
+		if units != null:
+			units.multimesh.instance_count = state.n
 	if weapon_flash.size() < state.n:
 		weapon_flash.resize(state.n)
-	_buf = build_buffer(state, palette)
-	RenderingServer.multimesh_set_buffer(bodies.multimesh.get_rid(), _buf)
+	if use_sprites:
+		if _atlas_dirty:
+			var colors: Array = []
+			for f in range(UnitAtlas.SLOTS):
+				colors.append(faction_color(f, palette))
+			units.texture = ImageTexture.create_from_image(UnitAtlas.build_image(colors, _hero_looks))
+			(units.material as ShaderMaterial).set_shader_parameter("atlas_cols", float(UnitAtlas.COLS))
+			(units.material as ShaderMaterial).set_shader_parameter("atlas_rows", float(UnitAtlas.rows_for(_hero_looks.size())))
+			_atlas_dirty = false
+		if hero_slots.size() < state.n:
+			var old_size: int = hero_slots.size()
+			hero_slots.resize(state.n)
+			for i in range(old_size, state.n):
+				hero_slots[i] = -1
+		_unit_buf = build_unit_buffer(state, unit_facing, unit_anim, hero_slots)
+		RenderingServer.multimesh_set_buffer(units.multimesh.get_rid(), _unit_buf)
+	else:
+		_buf = build_buffer(state, palette)
+		RenderingServer.multimesh_set_buffer(bodies.multimesh.get_rid(), _buf)
 	_weapon_buf = build_weapon_buffer(state, weapon_flash)
 	RenderingServer.multimesh_set_buffer(weapons.multimesh.get_rid(), _weapon_buf)
-	_hp_buf = build_hp_buffer(state)
+	_hp_buf = build_hp_buffer(state, SPRITE_HALF - SPRITE_DY if use_sprites else 1.0)
 	RenderingServer.multimesh_set_buffer(hp_bars.multimesh.get_rid(), _hp_buf)
 	_spark_buf = build_spark_buffer()
 	RenderingServer.multimesh_set_buffer(sparks.multimesh.get_rid(), _spark_buf)

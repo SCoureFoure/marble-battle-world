@@ -169,7 +169,7 @@ static func join(inst: BattleInstance, world: World, stack: int) -> bool:
 		state.xp[i] = units.xp[u]
 		state.kills[i] = units.kills[u]
 		state.spin_cap[i] += Tuning.DRILL_SPIN_BONUS * units.drill[u]
-		inst.unit_of.append(i)
+		inst.unit_of.append(u)   # marble index i -> world unit id u (i == unit_of.size() before append)
 
 	if prev_captain >= 0:
 		state.faction_captain[e] = prev_captain

@@ -54,6 +54,7 @@ static func save(w: World, path: String) -> Error:
 		"fate": w.units.fate,
 		"leader": w.units.leader,
 		"pledge_t": w.units.pledge_t,
+		"looks": w.units.looks,
 	})
 
 	# Live battles are not persisted: a stack caught in BATTLE is written as
@@ -192,6 +193,8 @@ static func load(path: String) -> World:
 	if units_dict.has("leader"):
 		w.units.leader = units_dict["leader"]
 		w.units.pledge_t = units_dict["pledge_t"]
+	if units_dict.has("looks"):
+		w.units.looks = units_dict["looks"]
 
 	w.stacks = Stacks.new(int(stacks_dict["cap"]))
 	w.stacks.n = stacks_dict["n"]

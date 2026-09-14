@@ -34,6 +34,7 @@ static func promote(w: World, u: int) -> void:
 		stack_name = String(w.stacks.names[stack_id])
 	w.log_event("%s rises from the ranks of %s" % [w.units.names[u], stack_name])
 	w.bump("promotions")
+	Looks.ensure(w, u)
 
 
 static func defect_chance(w: World, u: int) -> float:

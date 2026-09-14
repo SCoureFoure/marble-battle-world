@@ -17,6 +17,7 @@ var terrain_layer: TerrainLayer
 var renderer: BattleRenderer
 var label_pool: LabelPool
 var _prev_owner: PackedInt32Array
+var _hero_n: int = -1
 
 # Post-battle aftermath (§18): set once the watched battle leaves world.battles.
 var aftermath: BattleAftermath
@@ -96,6 +97,8 @@ func open(instance: BattleInstance) -> void:
 	_prev_owner = inst.terrain.owner.duplicate() if inst.terrain != null else PackedInt32Array()
 	terrain_layer.mark_dirty()
 	renderer.attach(inst.state)
+	_hero_n = -1
+	_sync_heroes()
 	_sync_palette()
 	camera.position = inst.state.arena.get_center()
 	camera.zoom = Vector2(1, 1)
@@ -155,6 +158,21 @@ static func build_palette(instance: BattleInstance, w: World) -> PackedInt32Arra
 	return pal
 
 
+## Rebuilds the marble -> hero-look map from world.units.looks / inst.unit_of
+## and hands it to the renderer. Called on open() and whenever marble count
+## changes (marbles can join a battle mid-fight).
+func _sync_heroes() -> void:
+	if world == null or inst == null:
+		return
+	var by_marble := {}
+	for i in range(mini(inst.state.n, inst.unit_of.size())):
+		var u: int = inst.unit_of[i]
+		if world.units.looks.has(u):
+			by_marble[i] = world.units.looks[u]
+	renderer.set_hero_looks(by_marble)
+	_hero_n = inst.state.n
+
+
 func _sync_palette() -> void:
 	var pal := build_palette(inst, world)
 	if pal == renderer.palette:
@@ -194,6 +212,8 @@ func _process(dt: float) -> void:
 
 	renderer.ingest(inst.state)
 	_sync_palette()
+	if inst.state.n != _hero_n:
+		_sync_heroes()
 
 	for event in inst.state.events:
 		var etype: int = event[0]
