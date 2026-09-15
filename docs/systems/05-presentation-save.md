@@ -86,10 +86,18 @@ is open; mouse handling in that function is skipped entirely while
 
 ### World map rendering layers
 
-1. `scripts/render/map_layer.gd::build` bakes an RGB8 `Image` (one pixel per
-   tile, colour by `WorldMap.Kind` from `TILE_COLORS` plus a small
-   deterministic per-tile dither), wrapped in a `Sprite2D` scaled by
-   `Tuning.TILE`.
+1. `scripts/render/map_layer.gd::build` bakes the ground. When every path in
+   `scripts/render/map_tile_art.gd::required_textures` exists (16×16 RPG tilesets and
+   sprites in `assets/art/map/`), `::_bake_art_image` builds one RGBA8 image at
+   16 px per tile: for each tile `MapTileArt.tile_ops` returns texture and colour
+   ops (layer 0 ground for every tile first, then layer 1 props, shore lines and
+   16×32 sprites that overlap the tile above). Variants come from
+   `MapTileArt.tile_hash` of the tile coordinates, never from an RNG. HILLS and
+   MOUNTAIN edges use `MapTileArt.nine_slice` against their 4 neighbours; RIVER
+   tiles get a 1-px `SHORE_COLOR` line on land-facing sides. The image sits in a
+   `Sprite2D` scaled by `Tuning.TILE / 16` and is rebuilt only by `build`. If
+   any texture is missing it falls back to the old one-pixel-per-tile
+   `TILE_COLORS` image scaled by `Tuning.TILE`.
 2. A second `Sprite2D` holds the ownership overlay from
    `::_build_overlay_image` (RGBA8, faction colour at alpha `OVERLAY_ALPHA`
    = 0.28, transparent where `owner < 0`); `::refresh_if_owner_changed`
@@ -99,11 +107,15 @@ is open; mouse handling in that function is skipped entirely while
    `_border_segments_by_owner`; `::_draw` renders each group with
    `draw_multiline` in that faction's `Tuning.FACTION_COLORS` entry
    darkened by `BORDER_DARKEN`.
-4. `::_draw_town` draws a house glyph per town (10×10 square + roof
-   triangle) in the owner's colour (`TOWN_NEUTRAL_COLOR` if neutral), grey
-   if RAIDED, black plus a small orange flame triangle if RAZED. Town
-   markers also redraw when `town_owner`/`town_state` change without a
-   `borders_version` bump (e.g. RAIDED → INTACT recovery).
+4. `::_draw_town_art` draws a 48×48 house sprite per town
+   (`MapTileArt.house_texture`), bottom on the tile's bottom edge, with an
+   owner-coloured pennant (none when neutral). RAIDED: house greyed, tattered
+   grey pennant. RAZED: house darkened, no pennant, three flames. Without map
+   art, `::_draw_town` draws the old glyph (square + roof triangle) in the
+   owner's colour (`TOWN_NEUTRAL_COLOR` if neutral), grey if RAIDED, black plus
+   a small orange flame if RAZED. Town markers also redraw when
+   `town_owner`/`town_state` change without a `borders_version` bump (e.g.
+   RAIDED → INTACT recovery).
 5. `scripts/render/stack_layer.gd::_draw` draws a filled circle per alive
    stack, radius `Tuning.STACK_RADIUS * (0.7 + 0.2 * tier)`, coloured by
    `Tuning.FACTION_COLORS[faction % 8]` with a dark outline, plus a red "X"
