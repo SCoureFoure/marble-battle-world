@@ -28,6 +28,8 @@ var alive: PackedByteArray
 var gold: PackedFloat32Array         # 0.0 (M9)
 var rally_target: PackedInt32Array   # -1; host stack a RALLY march is heading to (§19)
 var rally_cd: PackedFloat32Array     # 0.0; seconds before a refused stack may rally again (§19)
+var gen: PackedInt32Array            # 0; bumped each time this slot is recycled for a new stack (render/UI use it to spot a new occupant)
+var reusable: PackedByteArray        # 0; 1 = dead and unreferenced, set by SlotSweep; consumed by add() once n == cap
 
 
 func _init(capacity: int) -> void:
@@ -54,6 +56,8 @@ func _init(capacity: int) -> void:
 	gold.resize(capacity)
 	rally_target.resize(capacity)
 	rally_cd.resize(capacity)
+	gen.resize(capacity)
+	reusable.resize(capacity)
 
 	x.fill(0.0)
 	y.fill(0.0)
@@ -75,17 +79,27 @@ func _init(capacity: int) -> void:
 	gold.fill(0.0)
 	rally_target.fill(-1)
 	rally_cd.fill(0.0)
+	gen.fill(0)
+	reusable.fill(0)
 
 	path = []
 	names = []
 
 
 func add(faction_: int, x_: float, y_: float, name_: String) -> int:
-	if n >= cap:
-		push_error("Stacks.add: capacity exceeded")
-		return -1
-
 	var idx := n
+	if n >= cap:
+		idx = -1
+		for i in range(cap):
+			if reusable[i] == 1:
+				idx = i
+				break
+		if idx == -1:
+			push_error("Stacks.add: capacity exceeded")
+			return -1
+		reusable[idx] = 0
+		gen[idx] += 1
+
 	faction[idx] = faction_
 	x[idx] = x_
 	y[idx] = y_
@@ -96,19 +110,30 @@ func add(faction_: int, x_: float, y_: float, name_: String) -> int:
 	battle_id[idx] = -1
 	captain_unit[idx] = -1
 	count[idx] = 0
+	goal_tx[idx] = 0
+	goal_ty[idx] = 0
 	ai_timer[idx] = 0.0
 	immunity[idx] = 0.0
 	idle_timer[idx] = 0.0
 	gold[idx] = 0.0
 	rally_target[idx] = -1
 	rally_cd[idx] = 0.0
-	path.append(PackedVector2Array())
+	if idx == n:
+		path.append(PackedVector2Array())
+		names.append(name_)
+	else:
+		path[idx] = PackedVector2Array()
+		names[idx] = name_
 	path_i[idx] = 0
-	names.append(name_)
 	alive[idx] = 1
 
-	n += 1
+	if idx == n: n += 1
 	return idx
+
+
+## True when add() would succeed: space below cap, or a slot SlotSweep marked reusable.
+func has_room() -> bool:
+	return n < cap or reusable.find(1) != -1
 
 
 func tier(i: int) -> int:

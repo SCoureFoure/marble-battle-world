@@ -54,6 +54,8 @@ static func save(w: World, path: String) -> Error:
 		"fate": w.units.fate,
 		"leader": w.units.leader,
 		"pledge_t": w.units.pledge_t,
+		"gen": w.units.gen,
+		"reusable": w.units.reusable,
 		"looks": w.units.looks,
 	})
 
@@ -94,6 +96,8 @@ static func save(w: World, path: String) -> Error:
 		"gold": w.stacks.gold,
 		"rally_target": w.stacks.rally_target,
 		"rally_cd": w.stacks.rally_cd,
+		"gen": w.stacks.gen,
+		"reusable": w.stacks.reusable,
 	})
 
 	f.store_var({
@@ -195,6 +199,9 @@ static func load(path: String) -> World:
 		w.units.pledge_t = units_dict["pledge_t"]
 	if units_dict.has("looks"):
 		w.units.looks = units_dict["looks"]
+	if units_dict.has("gen"):
+		w.units.gen = units_dict["gen"]
+		w.units.reusable = units_dict["reusable"]
 
 	w.stacks = Stacks.new(int(stacks_dict["cap"]))
 	w.stacks.n = stacks_dict["n"]
@@ -221,6 +228,9 @@ static func load(path: String) -> World:
 	if stacks_dict.has("rally_target"):
 		w.stacks.rally_target = stacks_dict["rally_target"]
 		w.stacks.rally_cd = stacks_dict["rally_cd"]
+	if stacks_dict.has("gen"):
+		w.stacks.gen = stacks_dict["gen"]
+		w.stacks.reusable = stacks_dict["reusable"]
 
 	w.towns = towns_dict["towns"]
 	w.town_owner = towns_dict["town_owner"]

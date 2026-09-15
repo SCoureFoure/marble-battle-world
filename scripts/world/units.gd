@@ -22,7 +22,7 @@ var c_razes: PackedInt32Array
 var c_settles: PackedInt32Array
 var dynasty: Dictionary = {}        # unit id -> [name: String, numeral: int] (M5)
 var names: Dictionary = {}
-var looks: Dictionary = {}          # unit id -> CharLooks look Dictionary (captains/heroes), kept for life
+var looks: Dictionary = {}          # unit id -> CharLooks look Dictionary (captains/heroes), kept until the slot is recycled
 var hero: PackedByteArray           # 0 (M9)
 var career_start: PackedFloat32Array # 0.0, world time unit became hero or captain (M9)
 var ambition: PackedFloat32Array     # 0.0 (M9)
@@ -30,6 +30,8 @@ var mentor: PackedInt32Array         # -1, captain of stack hero broke away from
 var fate: PackedByteArray            # ACTIVE, see Fate enum (M9)
 var leader: PackedInt32Array         # -1 = the stack's own men; else the unit id of the hero whose contingent this unit belongs to (§19)
 var pledge_t: PackedFloat32Array     # 0.0; world time before which a hero who rallied into a stack will not break away (§19)
+var gen: PackedInt32Array            # 0; bumped each time this slot is recycled for a new unit (render/UI use it to spot a new occupant)
+var reusable: PackedByteArray        # 0; 1 = dead and unreferenced, set by SlotSweep; consumed by add() once n == cap
 
 
 func _init(capacity: int) -> void:
@@ -58,6 +60,8 @@ func _init(capacity: int) -> void:
 	fate.resize(capacity)
 	leader.resize(capacity)
 	pledge_t.resize(capacity)
+	gen.resize(capacity)
+	reusable.resize(capacity)
 
 	faction.fill(0)
 	rank.fill(0)
@@ -81,6 +85,8 @@ func _init(capacity: int) -> void:
 	fate.fill(Fate.ACTIVE)
 	leader.fill(-1)
 	pledge_t.fill(0.0)
+	gen.fill(0)
+	reusable.fill(0)
 
 	names = {}
 	looks = {}
@@ -88,11 +94,27 @@ func _init(capacity: int) -> void:
 
 
 func add(faction_: int, rank_: int, weapon_: int, captain: bool, stack_: int) -> int:
-	if n >= cap:
-		push_error("Units.add: capacity exceeded")
-		return -1
-
 	var idx := n
+	if n >= cap:
+		idx = -1
+		for i in range(cap):
+			if reusable[i] == 1:
+				idx = i
+				break
+		if idx == -1:
+			push_error("Units.add: capacity exceeded")
+			return -1
+		reusable[idx] = 0
+		gen[idx] += 1
+		ctrait[idx] = -1
+		c_fights[idx] = 0
+		c_retreats[idx] = 0
+		c_razes[idx] = 0
+		c_settles[idx] = 0
+		names.erase(idx)
+		looks.erase(idx)
+		dynasty.erase(idx)
+
 	faction[idx] = faction_
 	rank[idx] = rank_
 	weapon[idx] = weapon_
@@ -111,8 +133,13 @@ func add(faction_: int, rank_: int, weapon_: int, captain: bool, stack_: int) ->
 	leader[idx] = -1
 	pledge_t[idx] = 0.0
 
-	n += 1
+	if idx == n: n += 1
 	return idx
+
+
+## True when add() would succeed: space below cap, or a slot SlotSweep marked reusable.
+func has_room() -> bool:
+	return n < cap or reusable.find(1) != -1
 
 
 func kill(id: int) -> void:

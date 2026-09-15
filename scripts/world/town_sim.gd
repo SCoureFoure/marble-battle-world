@@ -42,7 +42,7 @@ static func _recruit(w: World, town_id: int, dt: float) -> void:
 		var target := _recruit_target(w, town_id, f)
 		# Stack or unit table full: hold the recruit (capped at one pending) instead
 		# of writing through a -1 id.
-		if (target == -1 and w.stacks.n >= w.stacks.cap) or w.units.n >= w.units.cap:
+		if (target == -1 and not w.stacks.has_room()) or not w.units.has_room():
 			w.town_recruit[town_id] = minf(w.town_recruit[town_id], 1.0)
 			break
 		w.town_recruit[town_id] -= 1.0

@@ -582,6 +582,8 @@ var n: int; var cap: int
 var faction, rank, xp, kills, weapon, stack: PackedInt32Array   # stack = stack id or -1 (dead/unassigned)
 var hp_frac: PackedFloat32Array                                  # 1.0 healthy; wounds persist until Settle (M4)
 var alive, is_captain: PackedByteArray
+var gen: PackedInt32Array                                         # 0; bumped each time the slot is recycled for a new unit
+var reusable: PackedByteArray                                     # 0; 1 = dead and unreferenced, set by SlotSweep
 var names: Dictionary                                            # unit id -> String, only captains/legends
 func _init(capacity: int) -> void
 func add(faction_: int, rank_: int, weapon_: int, captain: bool, stack_: int) -> int   # -1 when full
@@ -599,8 +601,10 @@ var goal_tx, goal_ty: PackedInt32Array
 var ai_timer, immunity, idle_timer: PackedFloat32Array
 var path: Array                      # per stack: PackedVector2Array of tile centres (world units), empty when none
 var path_i: PackedInt32Array         # next waypoint index
+var gen: PackedInt32Array                                         # 0; bumped each time the slot is recycled for a new unit
+var reusable: PackedByteArray                                     # 0; 1 = dead and unreferenced, set by SlotSweep
 var names: Array                     # String per stack
-var alive: PackedByteArray           # 0 once count reaches 0 (slot retired)
+var alive: PackedByteArray           # 0 once count reaches 0 (slot retired; may be recycled, see Slot recycling)
 func _init(capacity: int) -> void
 func add(faction_: int, x_: float, y_: float, name_: String) -> int
 func tier(i: int) -> int             # from count and Tuning.TIER_COUNTS
@@ -611,6 +615,21 @@ func label(i: int) -> String         # "(%s)%s %d/%d" % [TIER_NAMES[tier], name,
 `static func stack_name(rng) -> String` and `static func captain_name(rng) -> String`
 from syllable tables; captain names carry a dynasty numeral suffix
 `" I"` initially (M5 increments).
+
+#### Slot recycling (`slot_sweep.gd`)
+
+Both stores append at `n` until `n == cap`; only then does `add()` reuse the lowest slot with `reusable == 1`,
+bumping `gen` and resetting every field (a recycled unit also loses `ctrait`, `c_*`, and its `names`/`looks`/`dynasty` entries).
+Callers check `has_room()` (space below cap, or any reusable slot) instead of comparing `n` to `cap`.
+
+`SlotSweep.maybe_sweep(w, dt)` runs at the end of `WorldSim.step` on each whole world second while a store is within
+256 (units) / 16 (stacks) of cap. `SlotSweep.sweep(w)` recomputes `reusable` from scratch: a dead slot is reusable only if nothing references it —
+units: `captain_unit` of an alive stack, `leader`/`mentor` of an alive unit, any `town_lord`, an active battle's `unit_of`/`slayers`/`captain_before`;
+stacks: `stack` of an alive unit, `rally_target` of an alive stack, a `reinforce` key, an active battle's `stack_ids`. No rng is used.
+
+Render/UI code that caches by id compares `gen` to spot a new occupant: `StackLayer` (texture cache key `"unit:gen"`, walk state reset),
+`SpectatePanel` (a window whose slot was recycled shows "Fallen"), `world_scene` (follow stops).
+`gen` and `reusable` are saved; older saves load with both zeroed.
 
 ### 11.4 Pathing (`pathing.gd`)
 

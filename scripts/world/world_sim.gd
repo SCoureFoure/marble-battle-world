@@ -50,6 +50,7 @@ static func step_world(w: World, dt: float) -> void:
 static func step(w: World, dt: float) -> void:
 	step_world(w, dt)
 	step_battles(w)
+	SlotSweep.maybe_sweep(w, dt)
 
 
 static func pick_goal(w: World, i: int) -> void:

@@ -84,7 +84,7 @@ static func check_breakaway(w: World) -> void:
 ## draws when the stack table is full. `force_defect` (0/1) overrides the
 ## roll's *result* in step 4 (the roll is still drawn); -1 uses the roll.
 static func breakaway(w: World, u: int, force_defect: int = -1) -> int:
-	if w.stacks.n >= w.stacks.cap:
+	if not w.stacks.has_room():
 		return -1
 
 	# 1.

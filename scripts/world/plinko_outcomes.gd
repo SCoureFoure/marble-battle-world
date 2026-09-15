@@ -132,7 +132,7 @@ static func _recruit(w: World, stack: int, f: int) -> String:
 		n = n / 2
 	var added := 0
 	for _i in range(n):
-		if w.stacks.count[stack] >= Tuning.STACK_CAP or w.units.n >= w.units.cap:
+		if w.stacks.count[stack] >= Tuning.STACK_CAP or not w.units.has_room():
 			break
 		var weapon := Kingdoms.recruit_weapon(w, f, w.rng)
 		w.units.add(f, 0, weapon, false, stack)

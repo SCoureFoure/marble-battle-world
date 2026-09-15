@@ -272,7 +272,7 @@ static func _process_rebirth(world: World, inst: BattleInstance, winner_world: i
 			ruin = _nearest_ruin_tile(world, stacks.x[stack], stacks.y[stack])
 
 		var did_found := false
-		if founder_rank >= Tuning.LEGEND_RANK and ruin != Vector2i(-1, -1) and stacks.n < stacks.cap:
+		if founder_rank >= Tuning.LEGEND_RANK and ruin != Vector2i(-1, -1) and stacks.has_room():
 			var g := Kingdoms.new_faction(world, wf)
 			if g != -1:
 				did_found = true
