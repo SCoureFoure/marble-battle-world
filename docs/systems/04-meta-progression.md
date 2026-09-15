@@ -145,7 +145,42 @@ sides as a loser (`result["winner_side"]` records which local side won).
 The bridge itself is out of this slice's source files — full mechanics in
 [Overworld](02-overworld.md).
 
-### Name generation
+### Dissent and allegiance (observe only)
+
+Heroes, captains, lords and towns hold values on the same 5 axes (aggression,
+diplomacy, greed, piety, cohesion) as their faction's kingdom traits. Each has
+a loyalty (bond) to their own kingdom (0..1 fraction for living members; towns
+have no bond). Three readings are computed from these values:
+
+- **Unit disaffection** (`scripts/world/dissent.gd::unit_disaffection`):
+  distance between a unit's values and its kingdom's, reduced by the unit's bond.
+  Negative values mean the unit is more loyal than its values would suggest.
+- **Town disaffection** (`scripts/world/dissent.gd::town_disaffection`):
+  distance between a town's values and its owner kingdom's; 0.0 if unowned.
+- **Faction tension** (`scripts/world/dissent.gd::tension`):
+  population-weighted average of positive disaffection across a faction's
+  members and towns. High tension means substantial disagreement exists;
+  low tension means the realm is aligned.
+
+Nothing in the simulation currently acts on these readings — they are observe-only.
+`tools/stall_probe.gd` prints the values `top_tension top_members top_bond
+top_town_dis max_tension max_tension_f` for debugging and tuning.
+
+Units are seeded when created (captain promotion, lineage succession) from
+their kingdom's values plus small randomness. Towns are seeded from their lord's
+values at settlement. During each world tick, members' bond drifts toward 1.0
+(service accumulation), and towns' values drift toward their lord's values and
+their owner kingdom's values. Deeds (battles, raids, razes, pilgrimages) shift
+values based on the kind of event and scaled by `HERO_EVENT_SCALE`. Bond also
+adjusts: winning battles increase bond, retreating decreases it.
+
+The implementation uses no draws from `w.rng` — noise is deterministic, seeded
+from `w.rng.state` (or 0 if null) and unit identity via a local `RandomNumberGenerator`.
+
+The Dissent constants (`VALUE_SEED_SPREAD`, `BOND_*`, `TOWN_*_PULL`, `*_POWER`,
+`HERO_EVENT_SCALE`) are tuned knobs you can adjust to change how quickly values
+drift, how much bond matters, and how much political weight different roles carry.
+
 `scripts/world/namegen.gd` builds every generated name from three syllable
 tables (`ONSETS`, `CODAS`, plus `KINGDOM_SUFFIXES` or `LEGEND_ADJECTIVES`),
 always drawn through the caller's `RandomNumberGenerator` (deterministic):

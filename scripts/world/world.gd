@@ -12,6 +12,7 @@ var town_recruit: PackedFloat32Array
 var town_timer: PackedFloat32Array
 var town_gold: PackedFloat32Array   # 0.0 (M9)
 var town_lord: PackedInt32Array     # -1 (M9)
+var town_vals: PackedFloat32Array  # towns*5, index t*5+k, same axes as ktraits (§20)
 var units: Units
 var stacks: Stacks
 var pathing: Pathing
@@ -57,6 +58,7 @@ func _init() -> void:
 	town_timer = PackedFloat32Array()
 	town_gold = PackedFloat32Array()
 	town_lord = PackedInt32Array()
+	town_vals = PackedFloat32Array()
 	units = null
 	stacks = null
 	pathing = null
@@ -93,6 +95,7 @@ func setup_blank(cols: int, rows: int, seed: int) -> void:
 	town_timer = PackedFloat32Array()
 	town_gold = PackedFloat32Array()
 	town_lord = PackedInt32Array()
+	town_vals = PackedFloat32Array()
 	units = Units.new(2048)
 	stacks = Stacks.new(64)
 	pathing = Pathing.new(map)
@@ -391,12 +394,17 @@ func add_town(tile: Vector2i, owner: int) -> int:
 	town_timer.append(0.0)
 	town_gold.append(0.0)
 	town_lord.append(-1)
+	for k in range(5):
+		if owner >= 0 and ktraits.size() >= (owner + 1) * 5:
+			town_vals.append(ktraits[owner * 5 + k])
+		else:
+			town_vals.append(Tuning.KTRAIT_INIT)
 	map.kind[map.idx(tile.x, tile.y)] = WorldMap.Kind.TOWN
 	return id
 
 
-## Resizes town_state/town_pop/town_recruit/town_timer/town_gold/town_lord up to towns.size(),
-## filling new entries with 0 / TOWN_POP_START / 0.0 / 0.0 / 0.0 / -1. Never shrinks,
+## Resizes town_state/town_pop/town_recruit/town_timer/town_gold/town_lord/town_vals up to towns.size(),
+## filling new entries with 0 / TOWN_POP_START / 0.0 / 0.0 / 0.0 / -1 / KTRAIT_INIT. Never shrinks,
 ## never overwrites existing entries. Covers callers (e.g. tests) that
 ## append to towns/town_owner directly without going through add_town.
 func sync_town_arrays() -> void:
@@ -431,6 +439,11 @@ func sync_town_arrays() -> void:
 		town_lord.resize(n)
 		for i in range(old, n):
 			town_lord[i] = -1
+	if town_vals.size() < n * 5:
+		var old := town_vals.size()
+		town_vals.resize(n * 5)
+		for i in range(old, n * 5):
+			town_vals[i] = Tuning.KTRAIT_INIT
 
 
 func bump(key: String) -> void:

@@ -32,6 +32,8 @@ var leader: PackedInt32Array         # -1 = the stack's own men; else the unit i
 var pledge_t: PackedFloat32Array     # 0.0; world time before which a hero who rallied into a stack will not break away (§19)
 var gen: PackedInt32Array            # 0; bumped each time this slot is recycled for a new unit (render/UI use it to spot a new occupant)
 var reusable: PackedByteArray        # 0; 1 = dead and unreferenced, set by SlotSweep; consumed by add() once n == cap
+var vals: PackedFloat32Array        # cap*5, index u*5+k, same axes as World.ktraits; 0.0 until Dissent.seed_unit (§20)
+var bond: PackedFloat32Array        # 0.0; loyalty to own kingdom 0..1 (§20)
 
 
 func _init(capacity: int) -> void:
@@ -62,6 +64,8 @@ func _init(capacity: int) -> void:
 	pledge_t.resize(capacity)
 	gen.resize(capacity)
 	reusable.resize(capacity)
+	vals.resize(capacity * 5)
+	bond.resize(capacity)
 
 	faction.fill(0)
 	rank.fill(0)
@@ -87,6 +91,8 @@ func _init(capacity: int) -> void:
 	pledge_t.fill(0.0)
 	gen.fill(0)
 	reusable.fill(0)
+	vals.fill(0.0)
+	bond.fill(0.0)
 
 	names = {}
 	looks = {}
@@ -132,6 +138,9 @@ func add(faction_: int, rank_: int, weapon_: int, captain: bool, stack_: int) ->
 	fate[idx] = Fate.ACTIVE
 	leader[idx] = -1
 	pledge_t[idx] = 0.0
+	for k in range(5):
+		vals[idx*5 + k] = 0.0
+	bond[idx] = 0.0
 
 	if idx == n: n += 1
 	return idx

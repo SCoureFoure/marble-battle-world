@@ -102,9 +102,33 @@ func _line(w: World, births: int, battles_started: int, t0: int) -> void:
 				at_cap += 1
 			if w.stacks.faction[s] == top:
 				top_stacks += 1
-	print("PROBE t=%d factions_alive=%d real_factions=%d faction_count=%d towns=%d owned=%d top=%d top_towns=%d second_towns=%d top_unit_share=%.2f top_cohesion=%.2f top_split_cd=%.0f stacks=%d top_stacks=%d at_cap=%d units=%d battles_now=%d battles_started=%d faction_births=%d breakaways=%d foundings=%d stacks_n=%d stack_recycles=%d units_n=%d unit_recycles=%d wall_s=%.0f" % [
+	var top_tension := Dissent.tension(w, top)
+	var top_members := 0
+	var top_bond_sum := 0.0
+	for u_m in range(w.units.n):
+		if Dissent.member(w, u_m) and w.units.faction[u_m] == top:
+			top_members += 1
+			top_bond_sum += w.units.bond[u_m]
+	var top_bond := 0.0 if top_members == 0 else top_bond_sum / float(top_members)
+	var top_town_dis_sum := 0.0
+	var top_town_dis_count := 0
+	for t_dis in range(w.towns.size()):
+		if w.town_owner[t_dis] == top:
+			top_town_dis_sum += Dissent.town_disaffection(w, t_dis)
+			top_town_dis_count += 1
+	var top_town_dis := 0.0 if top_town_dis_count == 0 else top_town_dis_sum / float(top_town_dis_count)
+	var max_tension := 0.0
+	var max_tension_f := -1
+	for f_max in range(w.faction_count):
+		if w.faction_alive[f_max] == 1:
+			var tension := Dissent.tension(w, f_max)
+			if tension > max_tension:
+				max_tension = tension
+				max_tension_f = f_max
+	print("PROBE t=%d factions_alive=%d real_factions=%d faction_count=%d towns=%d owned=%d top=%d top_towns=%d second_towns=%d top_unit_share=%.2f top_cohesion=%.2f top_split_cd=%.0f top_tension=%.3f top_members=%d top_bond=%.2f top_town_dis=%.3f max_tension=%.3f max_tension_f=%d stacks=%d top_stacks=%d at_cap=%d units=%d battles_now=%d battles_started=%d faction_births=%d breakaways=%d foundings=%d stacks_n=%d stack_recycles=%d units_n=%d unit_recycles=%d wall_s=%.0f" % [
 		int(w.time), alive, real, w.faction_count, w.towns.size(), owned, top, towns_by[top], second_towns,
 		float(units_by[top]) / maxf(1.0, float(units_alive)), w.ktrait(top, 4), w.split_cooldown[top],
+		top_tension, top_members, top_bond, top_town_dis, max_tension, max_tension_f,
 		stacks_alive, top_stacks, at_cap, units_alive, w.battles.size(), battles_started, births,
 		int(w.history.get("breakaways", 0)), int(w.history.get("foundings", 0)),
 		w.stacks.n, _sum(w.stacks.gen), w.units.n, _sum(w.units.gen),

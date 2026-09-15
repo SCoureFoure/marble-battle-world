@@ -143,6 +143,18 @@ const KT_SETTLE_COH := 0.03
 const KT_RETREAT_AGGR := -0.02
 const KT_RETREAT_COH := -0.02
 const KT_PILGRIM_PIETY := 0.05
+# Dissent (§20): values, bond, disaffection. Observe-only readings.
+const VALUE_SEED_SPREAD := 0.15   # max +/- noise on a newly seeded unit value
+const HERO_EVENT_SCALE := 2.0     # unit value change per deed = kingdom event delta * this
+const TOWN_REALM_PULL := 0.002    # per second, town values move toward owner kingdom values
+const TOWN_LORD_PULL := 0.004     # per second, town values move toward its alive lord's values
+const BOND_INIT := 0.5
+const BOND_SERVICE_RATE := 0.001  # per second, member bond moves toward 1.0
+const BOND_WIN := 0.02
+const BOND_LOSS := 0.03
+const BOND_WEIGHT := 0.25         # disaffection = distance - BOND_WEIGHT * bond
+const POWER_HERO := 5.0
+const POWER_LORD := 10.0
 const PLINKO_BIAS_GREED := 200.0
 const GOAL_PILGRIMAGE_BASE := 0.5
 const GOAL_AVENGE_BASE := 0.5

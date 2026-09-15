@@ -127,6 +127,9 @@ static func found_town(w: World, s: int, tile: Vector2i) -> int:
 	w.town_gold[t] = minf(Tuning.TOWN_GOLD_MAX, w.stacks.gold[s])
 	w.stacks.gold[s] = 0.0
 	w.town_lord[t] = cap
+	if cap >= 0:
+		for k in range(5):
+			w.town_vals[t * 5 + k] = w.units.vals[cap * 5 + k]
 
 	if owner != f:
 		w.stacks.faction[s] = owner

@@ -118,6 +118,7 @@ static func _settle(w: World, stack: int, f: int) -> String:
 	# when no town was found (heal-only) -- both called unconditionally here.
 	Kingdoms.on_event(w, "settle", f)
 	Lineage.note_settle(w, w.stacks.captain_unit[stack])
+	Dissent.on_stack_event(w, "settle", stack)
 	return "%s: SETTLE took %d" % [w.stacks.names[stack], town]
 
 
@@ -171,6 +172,7 @@ static func _raze(w: World, stack: int, f: int) -> String:
 	# when no enemy town was in range.
 	Kingdoms.on_event(w, "raze", f)
 	Lineage.note_raze(w, w.stacks.captain_unit[stack])
+	Dissent.on_stack_event(w, "raze", stack)
 	return "%s: RAZE took %d" % [w.stacks.names[stack], town]
 
 

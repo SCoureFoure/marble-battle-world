@@ -56,6 +56,8 @@ static func save(w: World, path: String) -> Error:
 		"pledge_t": w.units.pledge_t,
 		"gen": w.units.gen,
 		"reusable": w.units.reusable,
+		"vals": w.units.vals,
+		"bond": w.units.bond,
 		"looks": w.units.looks,
 	})
 
@@ -109,6 +111,7 @@ static func save(w: World, path: String) -> Error:
 		"town_timer": w.town_timer,
 		"town_gold": w.town_gold,
 		"town_lord": w.town_lord,
+		"town_vals": w.town_vals,
 	})
 
 	f.store_var({
@@ -202,6 +205,9 @@ static func load(path: String) -> World:
 	if units_dict.has("gen"):
 		w.units.gen = units_dict["gen"]
 		w.units.reusable = units_dict["reusable"]
+	if units_dict.has("vals"):
+		w.units.vals = units_dict["vals"]
+		w.units.bond = units_dict["bond"]
 
 	w.stacks = Stacks.new(int(stacks_dict["cap"]))
 	w.stacks.n = stacks_dict["n"]
@@ -240,6 +246,8 @@ static func load(path: String) -> World:
 	w.town_timer = towns_dict["town_timer"]
 	w.town_gold = towns_dict["town_gold"]
 	w.town_lord = towns_dict["town_lord"]
+	if towns_dict.has("town_vals"):
+		w.town_vals = towns_dict["town_vals"]
 
 	w.ktraits = meta_dict["ktraits"]
 	w.relations = meta_dict["relations"]

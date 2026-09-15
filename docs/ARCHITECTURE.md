@@ -1801,3 +1801,80 @@ Stacks merge by choice. Tuning `RALLY_*` (see docs/systems/06).
   hero's contingent (alive units of the stack with `leader == u`) as
   followers with no rng draws when it has any, else the old random draw;
   movers get `leader = -1`.
+
+## 20. Dissent and allegiance (step 1: values, bond, readings)
+
+Heroes, captains, lords and towns hold values on the same 5 axes as
+`World.ktraits` (k: 0 aggression, 1 diplomacy, 2 greed, 3 piety, 4 cohesion)
+and can disagree with their kingdom. This step records values and computes
+readings (disaffection, power, tension); nothing acts on them yet. No outcome
+is a target — a realm that stays united is as valid as one that breaks.
+
+- **Fields:**
+  - `Units.vals` (`PackedFloat32Array`, size units.capacity * 5, index `u*5+k`):
+    value on axis k for unit u; 0.0 until seeded.
+  - `Units.bond` (`PackedFloat32Array`, size units.capacity): loyalty to own
+    kingdom, 0..1, clamped; 0.0 until seeded.
+  - `World.town_vals` (`PackedFloat32Array`, size towns.size() * 5, index
+    `t*5+k`): value on axis k for town t.
+  - Save dict: `"vals"` and `"bond"` under Units; `"town_vals"` under World.
+
+- **Dissent (`scripts/world/dissent.gd`, `class_name Dissent`, all static):**
+  - `enum Drive { GLORY = 0, WEALTH = 2, FAITH = 3, LAND = 4 }`: names the
+    value axes a hero's drives live on (diplomacy, axis 1, has no drive).
+    Informational.
+  - `event_deltas(kind: String) -> PackedFloat32Array` (5 entries): per-event
+    value changes: "win" → `[KT_WIN_AGGR, 0, 0, 0, 0]`; "raze" →
+    `[0, 0, KT_RAZE_GREED, KT_RAZE_PIETY, 0]`; "settle" →
+    `[0, 0, 0, 0, KT_SETTLE_COH]`; "retreat" → `[KT_RETREAT_AGGR, 0, 0, 0, KT_RETREAT_COH]`;
+    "pilgrim" → `[0, 0, 0, KT_PILGRIM_PIETY, 0]`; else `[0, 0, 0, 0, 0]`.
+  - `kingdom_vals(w, f) -> PackedFloat32Array`: `w.ktraits[f*5+k]` for each k;
+    invalid f → five `KTRAIT_INIT`.
+  - `unit_vals(w, u) -> PackedFloat32Array`: `w.units.vals[u*5+k]` for each k.
+  - `town_vals(w, t) -> PackedFloat32Array`: `w.town_vals[t*5+k]` for each k.
+  - `distance(a, b) -> float`: mean absolute difference = `(Σ|a[k]−b[k]|) / 5`.
+  - `noise(w, u) -> PackedFloat32Array`: local `RandomNumberGenerator` seeded
+    by `hash([w.rng.state if w.rng else 0, u, w.units.gen[u]])`, five values
+    `r.randf() * 2.0 - 1.0`. Never touches `w.rng` beyond reading `.state`.
+  - `seed_unit(w, u, src)`: sets `vals[u*5+k] = clamp(src[k] + VALUE_SEED_SPREAD * noise[k], 0, 1)`
+    for each k; sets `bond[u] = BOND_INIT`.
+  - `member(w, u) -> bool`: alive and (lord or (active and (hero or captain))).
+  - `on_stack_event(w, kind, stack)`: for every hero/captain u in stack, alive:
+    `vals[u*5+k] += event_deltas(kind)[k] * HERO_EVENT_SCALE`, clamped; "win"
+    → `bond[u] += BOND_WIN`, "retreat" → `bond[u] -= BOND_LOSS`.
+  - `tick(w)`: called once per world second. Every active hero/captain:
+    `bond[u]` drifts toward 1.0 by `BOND_SERVICE_RATE`. Every owned town t:
+    if lord u exists and alive, `town_vals[t*5+k]` drifts toward
+    `units.vals[u*5+k]` by `TOWN_LORD_PULL`; then toward kingdom owner's vals
+    by `TOWN_REALM_PULL`.
+  - `unit_disaffection(w, u) -> float`: `distance(unit_vals, kingdom_vals) - BOND_WEIGHT * bond`,
+    may be negative.
+  - `town_disaffection(w, t) -> float`: `distance(town_vals, kingdom_vals)`;
+    0.0 if unowned.
+  - `unit_power(w, u) -> float`: lord → `POWER_LORD`; captain with stack →
+    `count[stack]`; else `POWER_HERO`.
+  - `town_power(w, t) -> float`: `town_pop[t]`.
+  - `tension(w, f) -> float`: population-weighted average of positive
+    disaffection: `Σ(power * max(0, disaffection)) / Σpower`, per members and
+    towns of faction f; 0.0 if denominator zero.
+
+- **Seeding sites:**
+  - `Lineage.make_captain`: last line, `Dissent.seed_unit` from kingdom values.
+  - `Lineage.succeed`: if heir is not already a hero, `Dissent.seed_unit` from
+    old captain's values.
+  - `Heroes.promote`: last line, `Dissent.seed_unit` from kingdom values.
+  - `Settling.found_town`: after lord set, direct copy of captain's values into
+    town `vals` (for k 0..4: `town_vals[t*5+k] = units.vals[cap*5+k]`).
+
+- **Deed events** (each calls `Dissent.on_stack_event`):
+  - `PlinkoOutcomes._settle`: after `note_settle`, `on_stack_event(w, "settle", stack)`.
+  - `PlinkoOutcomes._raze`: after `note_raze`, `on_stack_event(w, "raze", stack)`.
+  - `WorldSim._on_arrive PILGRIMAGE`: after kingdom event, `on_stack_event(w, "pilgrim", i)`.
+  - `BattleBridge.finish`: winner stacks, `on_stack_event(world, "win", stack)`;
+    loser stacks, `on_stack_event(world, "retreat", stack)`.
+
+- **Tick order:** `WorldSim.step_world`, after `Settling.check_aging`, call
+  `Dissent.tick(w)` once per world second.
+
+- **RNG:** no draws from `w.rng`. Noise is deterministic, seeded from
+  `w.rng.state` (or 0 if null) and unit identity, via a local hash-seeded `RandomNumberGenerator`.

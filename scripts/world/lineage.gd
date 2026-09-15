@@ -27,6 +27,7 @@ static func make_captain(w: World, u: int, name_base: String) -> void:
 	w.units.names[u] = name_base + " I"
 	w.units.career_start[u] = w.time
 	Looks.ensure(w, u)
+	Dissent.seed_unit(w, u, Dissent.kingdom_vals(w, w.units.faction[u]))
 
 
 ## Called by the bridge copy-back when rank becomes LEGEND_RANK.
@@ -137,6 +138,8 @@ static func succeed(w: World, stack: int, old_captain: int, verb: String = "fell
 	w.units.dynasty[best] = [name, new_numeral]
 	w.units.names[best] = "%s %s" % [name, numeral(new_numeral)]
 	w.stacks.captain_unit[stack] = best
+	if w.units.hero[best] == 0:
+		Dissent.seed_unit(w, best, Dissent.unit_vals(w, old_captain))
 	Looks.ensure(w, best)
 
 	w.log_event("%s %s %s; %s rises" % [name, numeral(old_numeral), verb, w.units.names[best]])

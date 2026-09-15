@@ -29,6 +29,7 @@ static func step_world(w: World, dt: float) -> void:
 		Kingdoms.check_death(w)
 		Heroes.check_breakaway(w)
 		Settling.check_aging(w)
+		Dissent.tick(w)
 
 	for i in range(st.n):
 		if st.alive[i] == 0:
@@ -267,6 +268,7 @@ static func _on_arrive(w: World, i: int) -> void:
 	match st.goal[i]:
 		Stacks.Goal.PILGRIMAGE:
 			Kingdoms.on_event(w, "pilgrim", st.faction[i])
+			Dissent.on_stack_event(w, "pilgrim", i)
 		Stacks.Goal.RESTOCK:
 			var tile := w.stack_tile(i)
 			var t := w.town_at(tile)

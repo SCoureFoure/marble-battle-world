@@ -387,6 +387,7 @@ static func finish(inst: BattleInstance, world: World) -> Dictionary:
 				winner_name = stacks.names[stack]
 			stacks.state[stack] = Stacks.State.IDLE
 			stacks.idle_timer[stack] = Tuning.IDLE_AFTER_BATTLE
+			Dissent.on_stack_event(world, "win", stack)
 		else:
 			loser_stacks.append(stack)
 			if loser_name == "":
@@ -396,6 +397,7 @@ static func finish(inst: BattleInstance, world: World) -> Dictionary:
 				Kingdoms.on_event(world, "retreat", wf)
 			stacks.state[stack] = Stacks.State.RETREATING
 			stacks.immunity[stack] = Tuning.RETREAT_IMMUNITY
+			Dissent.on_stack_event(world, "retreat", stack)
 			var town_id := world.nearest_town(stacks.x[stack], stacks.y[stack], wf, 0)
 			var goal_tile: Vector2i
 			if town_id != -1:

@@ -35,6 +35,7 @@ static func promote(w: World, u: int) -> void:
 	w.log_event("%s rises from the ranks of %s" % [w.units.names[u], stack_name])
 	w.bump("promotions")
 	Looks.ensure(w, u)
+	Dissent.seed_unit(w, u, Dissent.kingdom_vals(w, w.units.faction[u]))
 
 
 static func defect_chance(w: World, u: int) -> float:

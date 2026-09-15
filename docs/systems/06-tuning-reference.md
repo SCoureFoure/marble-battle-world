@@ -209,6 +209,17 @@ constant without updating the matching assertion turns that test red.
 | `KT_RETREAT_AGGR` | `-0.02` | kingdoms.gd | - | Aggression trait change applied to a faction on retreating from battle. |
 | `KT_RETREAT_COH` | `-0.02` | kingdoms.gd | - | Cohesion trait change applied to a faction on retreating from battle. |
 | `KT_PILGRIM_PIETY` | `0.05` | kingdoms.gd | - | Piety trait change applied to a faction on completing a pilgrimage. |
+| `VALUE_SEED_SPREAD` | `0.15` | dissent.gd | - | Max +/- noise applied to a newly seeded unit or town value. |
+| `HERO_EVENT_SCALE` | `2.0` | dissent.gd | - | Multiplier applied to kingdom event deltas when updating hero/captain values. |
+| `TOWN_REALM_PULL` | `0.002` | dissent.gd | - | Per second, rate town values drift toward their owner kingdom's values. |
+| `TOWN_LORD_PULL` | `0.004` | dissent.gd | - | Per second, rate town values drift toward their lord's values. |
+| `BOND_INIT` | `0.5` | dissent.gd | - | Starting loyalty (0..1 fraction) when a hero/captain is seeded. |
+| `BOND_SERVICE_RATE` | `0.001` | dissent.gd | - | Per second, rate active hero/captain bond drifts toward 1.0. |
+| `BOND_WIN` | `0.02` | dissent.gd | - | Loyalty increase applied to hero/captain on a stack winning battle. |
+| `BOND_LOSS` | `0.03` | dissent.gd | - | Loyalty decrease applied to hero/captain on a stack retreating from battle. |
+| `BOND_WEIGHT` | `0.25` | dissent.gd | - | Multiplier applied to bond when computing disaffection; reduces disaffection by `BOND_WEIGHT * bond`. |
+| `POWER_HERO` | `5.0` | dissent.gd | - | Political weight of a hero (not captain, not lord). |
+| `POWER_LORD` | `10.0` | dissent.gd | - | Political weight of a lord. |
 | `GOAL_PILGRIMAGE_BASE` | `0.5` | kingdoms.gd | - | Base weight of the pilgrimage AI goal before the piety trait is added. |
 | `GOAL_AVENGE_BASE` | `0.5` | kingdoms.gd | - | Base weight of the avenge AI goal before the extra avenge-trait bonus is added. |
 | `REL_CAPTAIN_KILLED` | `-0.5` | kingdoms.gd | - | Relation change applied against the killer's faction when a faction's captain is killed. |
