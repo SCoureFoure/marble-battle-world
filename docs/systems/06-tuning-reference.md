@@ -118,6 +118,17 @@ constant without updating the matching assertion turns that test red.
 | `TOWNS_PER_FACTION` | `1` | world_gen.gd | - | Starting owned towns per faction. |
 | `NEUTRAL_TOWNS` | `18` | world_gen.gd | - | Number of unowned neutral towns placed at world start. |
 | `TOWN_MIN_SPACING` | `6` | world_gen.gd | - | Minimum Chebyshev tile distance kept between placed towns. |
+| `WORLDGEN_WFC` | `true` | world_gen.gd | - | Use the WFC generator (true) or the legacy noise-threshold generator (false). |
+| `WFC_CELL` | `2` | world_gen.gd | - | Tiles per side of one coarse WFC cell; every biome region is at least this wide. |
+| `WFC_MAX_ATTEMPTS` | `4` | world_gen.gd | - | WFC full restarts before the deterministic fallback fill. |
+| `WFC_AFFINITY` | `2.0` | world_gen.gd | - | Weight multiplier per already-collapsed same-kind neighbour; higher = bigger clumps. |
+| `RIVER_ELEV_COST` | `8.0` | world_gen.gd | - | Extra river flow cost per unit of positive elevation; higher = rivers hug valleys. |
+| `RIVER_MIN_LENGTH` | `12` | world_gen.gd | - | Minimum step distance from a river source to the map border. |
+| `RIVER_SOURCE_SPACING` | `4` | world_gen.gd | - | Minimum Chebyshev distance between river sources. |
+| `TOWN_SCORE_RIVER` | `2.0` | world_gen.gd | - | Town suitability bonus when that terrain is within 2 tiles. |
+| `TOWN_SCORE_FOREST` | `1.0` | world_gen.gd | - | Town suitability bonus when that terrain is within 2 tiles. |
+| `TOWN_SCORE_HILLS` | `0.5` | world_gen.gd | - | Town suitability bonus when that terrain is within 2 tiles. |
+| `TOWN_SCORE_MOUNTAIN` | `0.3` | world_gen.gd | - | Town suitability multiplier when a mountain is within 2 tiles. |
 | `STACKS_PER_FACTION` | `3` | world.gd | - | Number of unit stacks created per faction at world start. |
 | `STACK_UNITS_MIN` | `60` | world.gd | - | Minimum starting soldier count for a newly created stack. |
 | `STACK_UNITS_MAX` | `120` | world.gd | - | Maximum starting soldier count for a newly created stack. |

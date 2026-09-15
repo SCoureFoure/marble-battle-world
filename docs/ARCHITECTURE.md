@@ -552,20 +552,27 @@ func reachable_count(tx: int, ty: int) -> int     # BFS over passable 4-neighbou
 ```
 
 `WorldGen` (`world_gen.gd`, `class_name WorldGen`):
-`static func generate(m: WorldMap) -> Array` returns the town tile list
-(`Array[Vector2i]`) and fills `m.kind`. Uses `FastNoiseLite` seeded from
-`m.rng.randi()` (noise type SIMPLEX_SMOOTH, frequency 0.05): elevation
-`e` in [-1,1]: `e > 0.45` MOUNTAIN, `e > 0.2` HILLS, else PLAINS. A second
-noise (seed +1, frequency 0.08) `f > 0.25` → FOREST on PLAINS only. Rivers:
-`max(2, cols/32)` rivers, each starting at a random HILLS tile and walking
-to the lowest-elevation 4-neighbour until it reaches the map edge or 200
-steps, marking RIVER (never over MOUNTAIN; stops instead). RUIN ×6,
-GRAVEYARD ×6 on random PLAINS tiles. Towns: `N_FACTIONS * TOWNS_PER_FACTION + NEUTRAL_TOWNS`
-tiles chosen from PLAINS with Chebyshev spacing ≥ `TOWN_MIN_SPACING`
-(rejection sampling, up to 5000 attempts), set to TOWN, returned in order
-(first `N_FACTIONS` are capitals for factions 0..N-1). After placement,
-every town must be in the largest passable component: towns outside it are
-re-rolled (up to 20 rounds). Determinism: same seed → same map.
+`static func generate(m: WorldMap, town_count: int) -> Array` returns the town tile list
+(`Array[Vector2i]`) and fills `m.kind`. Switches on `Tuning.WORLDGEN_WFC`: if true, uses the WFC pipeline (Stages A–G: prior noise → biome WFC coarse grid → upscale → flow-field rivers → cleanup → props → scored town placement); if false, falls back to legacy `_generate_noise` for byte-identical old maps. Determinism: same seed → same map.
+
+`WorldWfc` (`scripts/world/wfc.gd`, `class_name WorldWfc`, pure static):
+- `biome_allow() -> PackedInt32Array`: adjacency bitmasks per biome kind.
+- `is_symmetric(allow: PackedInt32Array) -> bool`: validates adjacency table symmetry.
+- `violations(grid: PackedInt32Array, cols: int, rows: int, allow: PackedInt32Array) -> int`: count of adjacency violations.
+- `solve(cols: int, rows: int, allow: PackedInt32Array, prior: PackedFloat32Array, affinity: float, rng: RandomNumberGenerator, max_attempts: int) -> Dictionary`: returns `{"grid": PackedInt32Array, "attempts": int, "fallback": bool}`.
+
+Rng draw order (every draw from `m.rng`):
+```
+1. elevation noise seed m.rng.randi() (forest seed = elev_seed + 1, no draw)
+2. biome WFC one m.rng.randf() per observation, per attempt (variable count)
+          + one m.rng.randi_range() per observation to pick a cell from the lowest-entropy bucket
+3. rivers one m.rng.randi_range() per river to pick its source
+4. ruins two m.rng.randi_range() per attempt (x, y)
+5. graveyards same as ruins
+6. towns one m.rng.randf() per placed town
+```
+
+Town list order contract: first `N_FACTIONS` entries are farthest-point reordered capitals (spread for kingdom placement); remaining entries are neutral towns in the same order.
 
 ### 11.3 Units and Stacks (`units.gd`, `stacks.gd`)
 

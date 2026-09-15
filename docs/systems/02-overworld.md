@@ -29,27 +29,38 @@ running the full physics sim every tick.
    `TILE` world units per tile). `kind` is a `WorldMap.Kind` byte per tile;
    `cost_at` looks up `Tuning.TILE_COST[kind]` (`0.0` = impassable) and
    `passable` is `cost_at > 0.0`.
-2. `WorldGen.generate` (`scripts/world/world_gen.gd::generate`) fills `kind` and
-   returns the town tile list:
-   - Elevation: `FastNoiseLite` (`SIMPLEX_SMOOTH`, frequency `0.05`, seeded from
-     `m.rng.randi()`); `e > 0.45` → MOUNTAIN, `e > 0.2` → HILLS, else PLAINS.
-   - Forest: a second noise (seed + 1, frequency `0.08`); `f > 0.25` on a
-     PLAINS tile → FOREST.
-   - Rivers (`scripts/world/world_gen.gd::_carve_rivers`): `max(2, cols/32)`
-     rivers, each starting on a random HILLS tile and stepping to the
-     lowest-elevation 4-neighbour for up to 200 steps, marking RIVER; stops at
-     the map edge or when the next step would be a MOUNTAIN.
-   - `scripts/world/world_gen.gd::_scatter` places 6 RUIN and 6 GRAVEYARD
-     tiles on random PLAINS tiles.
-   - Towns: `N_FACTIONS * TOWNS_PER_FACTION + NEUTRAL_TOWNS` tiles placed by
-     `scripts/world/world_gen.gd::_place_town` (rejection sampling on PLAINS,
-     Chebyshev spacing ≥ `TOWN_MIN_SPACING`, up to 5000 attempts per town),
-     returned in placement order — the first `N_FACTIONS` become faction
-     capitals. `scripts/world/world_gen.gd::_fix_isolated_towns` re-rolls (up
-     to 20 rounds) any town outside the largest passable component
-     (`scripts/world/world_gen.gd::_largest_component`), dropping it from the
-     list if it still can't land inside that component.
-3. Faction starting positions: `World.create` (`scripts/world/world.gd::create`)
+2. `WorldGen.generate(m, town_count)` is the seam; `Tuning.WORLDGEN_WFC` picks WFC (default) or `_generate_noise` (legacy). The pipeline:
+   - A. Prior: Simplex elevation (frequency 0.05) and forest noise (frequency 0.08) sampled once per coarse cell.
+   - B. Biome WFC: tiled WFC on a `WFC_CELL` × `WFC_CELL` tile coarse grid, 4 states: PLAINS, FOREST, HILLS, MOUNTAIN, with adjacency rules:
+
+   |  | PLAINS | FOREST | HILLS | MOUNTAIN |
+   |---|---|---|---|---|
+   | PLAINS | ✓ | ✓ | ✓ | ✗ |
+   | FOREST | ✓ | ✓ | ✓ | ✗ |
+   | HILLS | ✓ | ✓ | ✓ | ✓ |
+   | MOUNTAIN | ✗ | ✗ | ✓ | ✓ |
+
+   Invariant: every 4-neighbour of a MOUNTAIN tile is MOUNTAIN or HILLS.
+
+   - C. Upscale: each coarse cell becomes a `WFC_CELL` × `WFC_CELL` tile block; adjacency rules hold on the tile grid.
+   - D. Rivers: flow field (Dijkstra cost-to-border) plus steepest descent; `max(2, cols/32)` rivers, paths end at the border or another river, never enter a tile 4-adjacent to MOUNTAIN.
+   - E. Cleanup: remove 1-wide HILLS and FOREST slivers that rivers cut, preserving the invariant (keep HILLS if 4-adjacent to MOUNTAIN).
+   - F. Props: 6 RUIN + 6 GRAVEYARD on PLAINS.
+   - G. Towns: suitability-weighted placement in the largest passable component, farthest-point reorder.
+3. Rng draw order (every draw from `m.rng`):
+   ```
+   1. elevation noise seed m.rng.randi() (forest seed = elev_seed + 1, no draw)
+   2. biome WFC one m.rng.randf() per observation, per attempt (variable count)
+            + one m.rng.randi_range() per observation to pick a cell from the lowest-entropy bucket
+   3. rivers one m.rng.randi_range() per river to pick its source
+   4. ruins two m.rng.randi_range() per attempt (x, y)
+   5. graveyards same as ruins
+   6. towns one m.rng.randf() per placed town
+   ```
+4. Towns: scored weighted placement (Chebyshev radius 2), candidates exclude border tiles. Score per candidate:
+   `score = 1.0 + 2.0 if RIVER within 2 + 1.0 if FOREST within 2 + 0.5 if HILLS within 2`, multiplied by `0.3 if MOUNTAIN within 2`, zero if MOUNTAIN within 1.
+   Weighted draw (Chebyshev spacing ≥ `TOWN_MIN_SPACING` from placed towns); candidates reordered by farthest-point distance so the first entries (drawn later as capitals by `World.create`) are spread.
+5. Faction starting positions: `World.create` (`scripts/world/world.gd::create`)
    assigns `towns[fi]` as faction `fi`'s capital (`owner = fi` for `fi <
    N_FACTIONS`), then places `STACKS_PER_FACTION` stacks on the capital tile
    and its passable neighbours (`scripts/world/world.gd::_passable_neighbours`),
@@ -244,6 +255,17 @@ marble's position:
 | `TOWNS_PER_FACTION` | `1` | More capitals seeded per faction at world creation. |
 | `NEUTRAL_TOWNS` | `18` | More unclaimed towns scattered across the map. |
 | `TOWN_MIN_SPACING` | `6` | Forces towns further apart (Chebyshev tiles), sparser map. |
+| `WORLDGEN_WFC` | `true` | Switch to true to use the WFC generator, false for legacy noise-threshold. |
+| `WFC_CELL` | `2` | Larger coarse cells make biome regions wider. |
+| `WFC_MAX_ATTEMPTS` | `4` | More restarts allow WFC to find a solution before deterministic fallback. |
+| `WFC_AFFINITY` | `2.0` | Higher multiplier makes clumps of the same biome bigger. |
+| `RIVER_ELEV_COST` | `8.0` | Higher cost makes rivers prefer valleys and avoid high ground. |
+| `RIVER_MIN_LENGTH` | `12` | Minimum distance from a river source to the map border. |
+| `RIVER_SOURCE_SPACING` | `4` | Minimum Chebyshev distance between river sources. |
+| `TOWN_SCORE_RIVER` | `2.0` | Bonus per town for having a river nearby (radius 2). |
+| `TOWN_SCORE_FOREST` | `1.0` | Bonus per town for having forest nearby (radius 2). |
+| `TOWN_SCORE_HILLS` | `0.5` | Bonus per town for having hills nearby (radius 2). |
+| `TOWN_SCORE_MOUNTAIN` | `0.3` | Multiplier on town score when a mountain is nearby (radius 2). |
 | `STACKS_PER_FACTION` | `3` | More starting stacks per faction. |
 | `STACK_UNITS_MIN` | `60` | Raises the floor on a starting stack's headcount. |
 | `STACK_UNITS_MAX` | `120` | Raises the ceiling on a starting stack's headcount. |
