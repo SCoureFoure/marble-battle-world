@@ -5,11 +5,14 @@ extends Node2D
 const ZOOM_MIN := 0.25
 const ZOOM_MAX := 3.0
 const ZOOM_STEP := 1.15
+const DRAG_THRESHOLD := 6.0
+const TIME_CONTROLS_POS := Vector2(8, 28)
 
 var world: World
 var map_layer: MapLayer
 var stack_layer: StackLayer
 var label_pool: LabelPool
+var map_labels: MapLabels
 var battle_view: BattleView
 var ledger_panel: LedgerPanel
 var plinko_view: PlinkoView
@@ -22,12 +25,16 @@ var follow_label: Label
 
 var followed_unit: int = -1
 var followed_stack: int = -1
+var _follow_shown: int = -1
+var _gen_unit: int = -1
+var _followed_gen: int = 0
 
 var steps_per_frame: int = 1
 var paused: bool = false
 var max_mode: bool = false
 var world_ms: float = 0.0
 var ticks: int = 0
+var map_seed: int = -1
 
 const SAVE_PATH := "user://save1.bin"
 var _message: String = ""
@@ -40,10 +47,57 @@ var capture_battle: bool = false
 var _dragging: bool = false
 var _drag_button: int = -1
 
+var panels_visible: bool = true
+var _left_down: bool = false
+var _left_press: Vector2 = Vector2.ZERO
+var _left_dragging: bool = false
+
+
+static func is_drag(press: Vector2, now: Vector2) -> bool:
+	return press.distance_to(now) > DRAG_THRESHOLD
+
+
+static func clamp_to_map(p: Vector2, map_size: Vector2) -> Vector2:
+	return Vector2(clampf(p.x, 0.0, map_size.x), clampf(p.y, 0.0, map_size.y))
+
+
+static func set_panels_visible(panels: Array, v: bool) -> void:
+	for element in panels:
+		if element == null:
+			continue
+		if element is CanvasLayer:
+			element.visible = v
+
+
+func _connect_spectate() -> void:
+	spectate_panel.follow_requested.connect(_on_follow_requested)
+	spectate_panel.center_requested.connect(_on_center_requested)
+
+
+func _on_follow_requested(stack_id: int) -> void:
+	if stack_id < 0 or stack_id >= world.stacks.n or world.stacks.alive[stack_id] == 0:
+		return
+	var cap: int = world.stacks.captain_unit[stack_id]
+	if cap < 0:
+		return
+	followed_unit = cap
+	followed_stack = stack_id
+	_follow_shown = stack_id
+
+
+func _on_center_requested(stack_id: int) -> void:
+	if stack_id < 0 or stack_id >= world.stacks.n:
+		return
+	followed_unit = -1
+	followed_stack = -1
+	camera.position = clamp_to_map(Vector2(world.stacks.x[stack_id], world.stacks.y[stack_id]), _map_size())
+
 
 func _ready() -> void:
-	var seed_val := 1
+	var seed_val: int = -1
 	var follow_arg := false
+	var zoom_arg: float = -1.0
+	var panels_arg: int = 1
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--seed="):
 			seed_val = int(arg.substr(7))
@@ -55,6 +109,18 @@ func _ready() -> void:
 			capture_battle = int(arg.substr(17)) == 1
 		elif arg.begins_with("--follow="):
 			follow_arg = int(arg.substr(9)) == 1
+		elif arg.begins_with("--zoom="):
+			zoom_arg = float(arg.substr(7))
+		elif arg.begins_with("--panels="):
+			panels_arg = int(arg.substr(9))
+
+	if seed_val < 0:
+		# Fresh map on every plain run; drawn once here, outside the sim, so the run stays replayable with --seed=.
+		var seed_rng := RandomNumberGenerator.new()
+		seed_rng.randomize()
+		seed_val = seed_rng.randi_range(1, 2147483647)
+	map_seed = seed_val
+	print("WORLD seed=%d" % seed_val)
 
 	world = World.create(seed_val)
 
@@ -75,6 +141,8 @@ func _ready() -> void:
 	var capital: Vector2 = world.towns[0]
 	camera.position = world.map.center_of(int(capital.x), int(capital.y))
 	camera.zoom = Vector2(0.6, 0.6)
+	if zoom_arg > 0.0:
+		camera.zoom = Vector2(zoom_arg, zoom_arg)
 	camera.limit_left = 0
 	camera.limit_top = 0
 	camera.limit_right = int(world.map.cols * Tuning.TILE)
@@ -87,6 +155,11 @@ func _ready() -> void:
 	label_pool.name = "LabelPool"
 	add_child(label_pool)
 	stack_layer.label_pool = label_pool
+
+	map_labels = MapLabels.new()
+	map_labels.name = "MapLabels"
+	add_child(map_labels)
+	map_labels.build(world, camera)
 
 	battle_view = BattleView.new()
 	battle_view.name = "BattleView"
@@ -108,6 +181,7 @@ func _ready() -> void:
 	add_child(spectate_panel)
 	spectate_panel.build(world)
 	battle_view.spectate_panel = spectate_panel
+	_connect_spectate()
 
 	timeline_panel = TimelinePanel.new()
 	timeline_panel.name = "TimelinePanel"
@@ -128,6 +202,23 @@ func _ready() -> void:
 	layer.add_child(follow_label)
 
 	_build_time_controls()
+
+	if panels_arg == 0:
+		panels_visible = false
+	set_panels_visible(_panel_nodes(), panels_visible)
+
+
+func _panel_nodes() -> Array:
+	return [ledger_panel, spectate_panel, plinko_view, timeline_panel]
+
+
+func _toggle_panels() -> void:
+	panels_visible = not panels_visible
+	set_panels_visible(_panel_nodes(), panels_visible)
+
+
+func _map_size() -> Vector2:
+	return Vector2(world.map.cols * Tuning.TILE, world.map.rows * Tuning.TILE)
 
 
 func _build_time_controls() -> void:
@@ -164,11 +255,22 @@ func _build_time_controls() -> void:
 	btn_max.pressed.connect(_set_max)
 	time_controls.add_child(btn_max)
 
-	# Rough bottom-centre placement (five short buttons); not pixel-exact,
-	# HBoxContainer's real minimum size isn't known until after layout.
-	var vp := get_viewport()
-	var size: Vector2 = vp.get_visible_rect().size if vp != null else Vector2(1280.0, 720.0)
-	time_controls.position = Vector2(size.x / 2.0 - 150.0, size.y - 40.0)
+	var btn_ui := Button.new()
+	btn_ui.text = "UI"
+	btn_ui.pressed.connect(_toggle_panels)
+	time_controls.add_child(btn_ui)
+
+	var btn_log := Button.new()
+	btn_log.text = "Log"
+	btn_log.pressed.connect(func(): timeline_panel.toggle_collapsed())
+	time_controls.add_child(btn_log)
+
+	var btn_factions := Button.new()
+	btn_factions.text = "Factions"
+	btn_factions.pressed.connect(func(): ledger_panel.toggle_collapsed())
+	time_controls.add_child(btn_factions)
+
+	time_controls.position = TIME_CONTROLS_POS
 
 
 ## `--follow=1`: follow the captain of the last stack (highest id) whose
@@ -231,14 +333,26 @@ func _process(delta: float) -> void:
 	battle_view.paused = paused
 
 	if followed_unit != -1:
-		var r := Follow.step(world, followed_unit, followed_stack)
-		if r[2] != "":
-			world.log_event(r[2])
-		followed_unit = r[0]
-		followed_stack = r[1]
-		if followed_unit != -1 and followed_stack >= 0:
-			camera.position = Vector2(world.stacks.x[followed_stack], world.stacks.y[followed_stack])
-			spectate_panel.show_stack(followed_stack)
+		if followed_unit != _gen_unit:
+			_gen_unit = followed_unit
+			_followed_gen = world.units.gen[followed_unit]
+		elif world.units.gen[followed_unit] != _followed_gen:
+			followed_unit = -1
+			followed_stack = -1
+			_gen_unit = -1
+		if followed_unit != -1:
+			var r := Follow.step(world, followed_unit, followed_stack)
+			if r[2] != "":
+				world.log_event(r[2])
+			followed_unit = r[0]
+			followed_stack = r[1]
+			if followed_unit != -1 and followed_stack >= 0:
+				camera.position = Vector2(world.stacks.x[followed_stack], world.stacks.y[followed_stack])
+				if followed_stack != _follow_shown:
+					spectate_panel.show_stack(followed_stack)
+					_follow_shown = followed_stack
+	if followed_unit == -1:
+		_follow_shown = -1
 	follow_label.visible = followed_unit != -1
 	if followed_unit != -1:
 		follow_label.text = "Following: %s — %s" % [
@@ -259,7 +373,8 @@ func _process(delta: float) -> void:
 	if not battle_view.visible:
 		map_layer.refresh_if_owner_changed()
 		stack_layer.queue_redraw()
-		stack_layer.update_labels()
+		map_labels.refresh()
+	map_labels.visible = not battle_view.visible
 
 	var alive_stacks := 0
 	var total_units := 0
@@ -272,7 +387,8 @@ func _process(delta: float) -> void:
 		_message_timer -= delta
 		hud.text = _message
 	else:
-		hud.text = "t %.0fs  stacks %d  battles %d  units %d  fps %d  world %.1f ms  %s" % [
+		hud.text = "seed %s  t %.0fs  stacks %d  battles %d  units %d  fps %d  world %.1f ms  %s" % [
+			str(map_seed) if map_seed >= 0 else "-",
 			world.time, alive_stacks, world.battles.size(), total_units,
 			Engine.get_frames_per_second(), world_ms, _speed_label(),
 		]
@@ -309,15 +425,34 @@ func _unhandled_input(event: InputEvent) -> void:
 				KEY_F:
 					_toggle_follow()
 					return
+				KEY_H:
+					_toggle_panels()
+					return
+				KEY_L:
+					timeline_panel.toggle_collapsed()
+					return
+				KEY_K:
+					ledger_panel.toggle_collapsed()
+					return
 
 	if battle_view.visible:
+		_left_down = false
+		_left_dragging = false
 		return
 
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
-		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
-			if not _try_open_battle():
-				_try_spectate_stack()
+		if mb.button_index == MOUSE_BUTTON_LEFT:
+			if mb.pressed:
+				_left_down = true
+				_left_press = mb.position
+				_left_dragging = false
+			else:
+				if _left_down and not _left_dragging:
+					if not _try_open_battle():
+						_try_spectate_stack()
+				_left_down = false
+				_left_dragging = false
 		elif mb.button_index == MOUSE_BUTTON_RIGHT or mb.button_index == MOUSE_BUTTON_MIDDLE:
 			if mb.pressed:
 				_dragging = true
@@ -330,9 +465,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_zoom(1.0 / ZOOM_STEP)
 	elif event is InputEventMouseMotion:
-		if _dragging:
-			var mm := event as InputEventMouseMotion
-			camera.position -= mm.relative / camera.zoom.x
+		var mm := event as InputEventMouseMotion
+		if _left_down and not _left_dragging and is_drag(_left_press, mm.position):
+			_left_dragging = true
+			followed_unit = -1
+			followed_stack = -1
+		if _dragging or _left_dragging:
+			camera.position = clamp_to_map(camera.position - mm.relative / camera.zoom.x, _map_size())
 
 
 ## `F`: following -> stop; else if the spectate panel shows a stack with a
@@ -346,6 +485,7 @@ func _toggle_follow() -> void:
 	if s >= 0 and world.stacks.captain_unit[s] >= 0:
 		followed_unit = world.stacks.captain_unit[s]
 		followed_stack = s
+		_follow_shown = s
 
 
 ## Nearest alive stack to the click, within STACK_RADIUS * 2 / zoom world
@@ -379,7 +519,12 @@ func _try_load() -> void:
 ## (m6-ui.md §fiat).
 func _rebuild_layers(new_world: World) -> void:
 	world = new_world
+	map_seed = -1
 	battle_view.close()
+	_gen_unit = -1
+
+	var ledger_was_collapsed: bool = ledger_panel.collapsed
+	var timeline_was_collapsed: bool = timeline_panel.collapsed
 
 	remove_child(map_layer)
 	map_layer.queue_free()
@@ -405,11 +550,13 @@ func _rebuild_layers(new_world: World) -> void:
 	stack_layer.world = world
 	stack_layer.camera = camera
 	stack_layer.label_pool = label_pool
+	map_labels.world = world
 
 	ledger_panel = LedgerPanel.new()
 	ledger_panel.name = "LedgerPanel"
 	add_child(ledger_panel)
 	ledger_panel.build(world)
+	ledger_panel.set_collapsed(ledger_was_collapsed)
 
 	plinko_view = PlinkoView.new()
 	plinko_view.name = "PlinkoView"
@@ -421,13 +568,17 @@ func _rebuild_layers(new_world: World) -> void:
 	add_child(spectate_panel)
 	spectate_panel.build(world)
 	battle_view.spectate_panel = spectate_panel
+	_connect_spectate()
 
 	timeline_panel = TimelinePanel.new()
 	timeline_panel.name = "TimelinePanel"
 	add_child(timeline_panel)
 	timeline_panel.build(world)
+	timeline_panel.set_collapsed(timeline_was_collapsed)
 
 	battle_view.world = world
+
+	set_panels_visible(_panel_nodes(), panels_visible)
 
 
 func _zoom(factor: float) -> void:

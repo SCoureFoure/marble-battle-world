@@ -5,6 +5,7 @@ const ONSETS := ["ka", "to", "mu", "ren", "vel", "dor", "ash", "bri", "gal", "it
 const CODAS := ["n", "r", "th", "s", "l", "k", "", "m"]
 const KINGDOM_SUFFIXES := ["ia", "mark", "land", "gard"]
 const LEGEND_ADJECTIVES := ["Mudslide", "Ironhand", "Redspin", "Grim", "Quiet", "Wolfish", "Brassbound", "Hollow"]
+const TOWN_SUFFIXES := ["ford", "ton", "wick", "holm", "burg", "stead", "by", "mere"]
 
 
 static func stack_name(rng: RandomNumberGenerator) -> String:
@@ -42,3 +43,13 @@ static func legend_name(rng: RandomNumberGenerator, kills: int) -> String:
 
 static func hero_epithet(rng: RandomNumberGenerator) -> String:
 	return LEGEND_ADJECTIVES[rng.randi_range(0, LEGEND_ADJECTIVES.size() - 1)]
+
+
+## Town name derived only from its tile, so it needs no saved state and draws nothing from the world rng.
+static func town_name(tile: Vector2i) -> String:
+	var r := RandomNumberGenerator.new()
+	r.seed = absi(tile.x * 73856093 ^ tile.y * 19349663) + 7919
+	var a: String = ONSETS[r.randi_range(0, ONSETS.size() - 1)]
+	var c: String = CODAS[r.randi_range(0, CODAS.size() - 1)]
+	var suf: String = TOWN_SUFFIXES[r.randi_range(0, TOWN_SUFFIXES.size() - 1)]
+	return a.capitalize() + c + suf
