@@ -156,5 +156,20 @@ func _init() -> void:
 	t.check(BattleState.Event.BUMP == 5, "BattleState.Event.BUMP == 5")
 	t.check(BattleState.Event.BOOST == 6, "BattleState.Event.BOOST == 6")
 
+	# Case 14: faction_total counts every spawn and never drops; ally_death_hit scales by side size
+	var s14 := BattleState.new(200, 1)
+	s14.spawn_block(0, 60, Rect2(0, 0, 10, 10), 1)
+	s14.spawn_block(1, 120, Rect2(0, 0, 10, 10), 1)
+	s14.spawn(5.0, 5.0, 2, 0, 1, false)
+	s14.spawn(5.0, 5.0, 2, 0, 1, false)
+	t.check(s14.faction_total[0] == 60 and s14.faction_total[1] == 120 and s14.faction_total[2] == 2, "case14 faction_total per side")
+	s14.state[0] = BattleState.State.DEAD
+	s14.faction_alive[0] -= 1
+	t.check(s14.faction_total[0] == 60, "case14 faction_total unchanged by a death")
+	t.check(t.approx(s14.ally_death_hit(0), -0.02, 1e-6), "case14 hit at 60 == -0.02")
+	t.check(t.approx(s14.ally_death_hit(1), -0.01, 1e-6), "case14 hit at 120 == -0.01")
+	t.check(t.approx(s14.ally_death_hit(2), -0.6, 1e-6), "case14 hit at 2 == -0.6")
+	t.check(t.approx(s14.ally_death_hit(3), -1.2, 1e-6), "case14 hit with no marbles uses side size 1")
+
 	t.finish()
 	quit()

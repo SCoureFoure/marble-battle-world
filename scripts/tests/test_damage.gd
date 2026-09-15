@@ -128,7 +128,7 @@ func _init() -> void:
 	t.check(s8.faction_alive[1] == alive_before - 1, "case8 faction_alive decremented")
 	t.check(s8.events[0][0] == BattleState.Event.HIT, "case8 first event HIT")
 	t.check(s8.events[1][0] == BattleState.Event.KILL, "case8 second event KILL")
-	t.check(t.approx(s8.morale[c8], 0.8 + Tuning.MORALE_HIT_ALLY_DEATH, 1e-6), "case8 ally morale reduced")
+	t.check(t.approx(s8.morale[c8], 0.2, 1e-6), "case8 ally morale reduced by side-scaled hit (2 marbles: -0.6)")
 
 	# 9. Captain kill: additional CAPTAIN_DEAD event, faction_captain set to -1, additional morale hit
 	var s9 := make(1)
@@ -141,7 +141,7 @@ func _init() -> void:
 	Damage.apply(s9, a9, b9, 6.0, BattleState.Event.HIT)
 	t.check(s9.events[2][0] == BattleState.Event.CAPTAIN_DEAD, "case9 CAPTAIN_DEAD event")
 	t.check(s9.faction_captain[1] == -1, "case9 faction_captain set to -1")
-	t.check(t.approx(s9.morale[c9], maxf(0.0, 0.8 + Tuning.MORALE_HIT_ALLY_DEATH + Tuning.MORALE_HIT_CAPTAIN_DEAD), 1e-6), "case9 ally morale both penalties")
+	t.check(t.approx(s9.morale[c9], 0.0, 1e-6), "case9 ally morale both penalties, clamped at 0")
 
 	# 10. Rank-up: xp = 29, apply damage -> rank increases, spin_cap and hp_max updated
 	var s10 := make(1)
@@ -208,6 +208,18 @@ func _init() -> void:
 	s15.recoil_t[a15] = 0.0
 	Damage.apply(s15, a15, b15, 5.0, BattleState.Event.LEVEL)
 	t.check(t.approx(s15.recoil_t[a15], 0.0, 1e-6), "case15 LEVEL event doesn't set recoil_t")
+
+	# Big side: 60 marbles on faction 1 -> one death costs each ally exactly -0.02
+	var s_big := BattleState.new(80, 1)
+	var a_big: int = s_big.spawn(100.0, 100.0, 0, 0, 1, false)
+	var b_big: int = s_big.spawn(118.0, 100.0, 1, 0, 1, false)
+	s_big.spawn_block(1, 59, Rect2(800, 400, 50, 50), 1)
+	var c_big: int = b_big + 1
+	s_big.hp[b_big] = 5.0
+	s_big.morale[c_big] = 0.8
+	Damage.apply(s_big, a_big, b_big, 6.0, BattleState.Event.HIT)
+	t.check(s_big.state[b_big] == BattleState.State.DEAD, "big side victim dead")
+	t.check(t.approx(s_big.morale[c_big], 0.78, 1e-5), "big side (60) ally morale -0.02")
 
 	t.finish()
 	quit()

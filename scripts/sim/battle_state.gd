@@ -49,6 +49,7 @@ var events: Array = []
 
 # per-faction
 var faction_alive: PackedInt32Array
+var faction_total: PackedInt32Array   # marbles ever spawned per faction (never decremented)
 var faction_cx: PackedFloat32Array
 var faction_cy: PackedFloat32Array
 var faction_captain: PackedInt32Array
@@ -135,12 +136,14 @@ func _init(capacity: int, seed: int) -> void:
 
 	# Resize faction arrays to MAX_FACTIONS
 	faction_alive.resize(Tuning.MAX_FACTIONS)
+	faction_total.resize(Tuning.MAX_FACTIONS)
 	faction_cx.resize(Tuning.MAX_FACTIONS)
 	faction_cy.resize(Tuning.MAX_FACTIONS)
 	faction_captain.resize(Tuning.MAX_FACTIONS)
 
 	# Fill faction arrays
 	faction_alive.fill(0)
+	faction_total.fill(0)
 	faction_cx.fill(0.0)
 	faction_cy.fill(0.0)
 	faction_captain.fill(-1)
@@ -233,11 +236,19 @@ func spawn(x: float, y: float, faction: int, rank_: int, weapon: int, captain: b
 
 	# Update faction tracking
 	faction_alive[faction] += 1
+	faction_total[faction] += 1
 	faction_count = max(faction_count, faction + 1)
 
 	# Increment marble count and return index
 	n += 1
 	return idx
+
+
+## Morale change every live ally takes when one marble of `faction` dies:
+## MORALE_HIT_ALLY_DEATH scaled by MORALE_REF_SIDE / marbles ever spawned on that
+## side, so a side routs after losing a share of its strength, not a fixed count.
+func ally_death_hit(faction: int) -> float:
+	return Tuning.MORALE_HIT_ALLY_DEATH * Tuning.MORALE_REF_SIDE / float(maxi(faction_total[faction], 1))
 
 
 func alive_count() -> int:

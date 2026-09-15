@@ -69,6 +69,7 @@ FRICTION_MUD = 0.80
 FRICTION_COBBLE = 0.98
 MORALE_START = 0.8
 MORALE_HIT_ALLY_DEATH = -0.02
+MORALE_REF_SIDE = 60.0
 MORALE_HIT_CAPTAIN_DEAD = -0.4
 RETREAT_THRESHOLD = 0.25
 RANK_MULT = [1.0, 1.25, 1.6, 2.2]
@@ -152,6 +153,7 @@ var target_id: PackedInt32Array             # current attraction target, -1 none
 var is_captain: PackedByteArray             # 1 if captain
 # per-faction
 var faction_alive: PackedInt32Array         # live count, maintained by BattleSim
+var faction_total: PackedInt32Array         # marbles ever spawned, incremented in spawn, never decremented
 var faction_cx, faction_cy: PackedFloat32Array   # centroid of live marbles, recomputed each tick
 var faction_captain: PackedInt32Array       # marble index of captain, -1 none
 
@@ -408,7 +410,7 @@ For every marble `i` with `state != DEAD`:
    push `[Event.HIT, i, j]`.
 8. If `hp[j] <= 0`: `state[j] = DEAD`; `hp[j] = 0`; `kills[i] += 1`;
    `xp[i] += XP_PER_KILL`; `faction_alive[f_j] -= 1`; push `[Event.KILL, i, j]`;
-   every live marble `m` of faction `f_j`: `morale[m] = max(0, morale[m] + MORALE_HIT_ALLY_DEATH)`.
+   every live marble `m` of faction `f_j`: `morale[m] = max(0, morale[m] + ally_death_hit(f_j))` where ally_death_hit(f) = MORALE_HIT_ALLY_DEATH * MORALE_REF_SIDE / max(faction_total[f], 1) (a side routs after losing a share of its strength, not a fixed count).
    If `is_captain[j]`: additionally `morale[m] = max(0, morale[m] + MORALE_HIT_CAPTAIN_DEAD)`
    for those `m`, `faction_captain[f_j] = -1`, push `[Event.CAPTAIN_DEAD, i, j]`.
 9. Rank-up check for `i` (after xp changes): while `rank[i] < 3 and xp[i] >= RANK_XP[rank[i] + 1]`:
@@ -1054,7 +1056,7 @@ watched. Operates on the same `BattleState`; positions are left untouched
    several marbles take damage per step), `xp[a] += chunk * LOD_XP_PER_DMG`
    (accumulate in a float side array and floor into xp), push `[HIT, a, t]`.
    Death: `state = DEAD`, `hp = 0`, `kills[a] += 1`, `xp[a] += XP_PER_KILL`,
-   `faction_alive[side] -= 1`, `[KILL, a, t]`, morale hits to that side
+   `faction_alive[side] -= 1`, `[KILL, a, t]`, morale hits to that side (side-scaled, as §10.4 step 8)
    (ally −0.02; captain −0.4 + `faction_captain = -1` + `[CAPTAIN_DEAD, a, t]`),
    rank-up check on `a` exactly as `Weapons` does it.
 3. Spin decay, morale/hp retreat triggers as `BattleSim` step 10; a RETREAT

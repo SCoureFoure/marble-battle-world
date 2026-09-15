@@ -33,9 +33,10 @@ static func apply(s: BattleState, attacker: int, victim: int, dmg: float, event_
 		s.faction_alive[fj] -= 1
 		s.events.append([BattleState.Event.KILL, attacker, victim])
 		var captain_dead: bool = s.is_captain[victim] == 1
+		var ally_hit: float = s.ally_death_hit(fj)
 		for m in range(s.n):
 			if s.state[m] != BattleState.State.DEAD and s.faction_id[m] == fj:
-				s.morale[m] = maxf(0.0, s.morale[m] + Tuning.MORALE_HIT_ALLY_DEATH)
+				s.morale[m] = maxf(0.0, s.morale[m] + ally_hit)
 				if captain_dead:
 					s.morale[m] = maxf(0.0, s.morale[m] + Tuning.MORALE_HIT_CAPTAIN_DEAD)
 		if captain_dead:

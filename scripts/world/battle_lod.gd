@@ -104,7 +104,7 @@ static func step(inst: BattleInstance, dt: float) -> void:
 		var fm: int = s.faction_id[m]
 		if fm < 0 or fm >= 4 or deaths[fm] == 0:
 			continue
-		var hit: float = deaths[fm] * Tuning.MORALE_HIT_ALLY_DEATH + captain_deaths[fm] * Tuning.MORALE_HIT_CAPTAIN_DEAD
+		var hit: float = deaths[fm] * s.ally_death_hit(fm) + captain_deaths[fm] * Tuning.MORALE_HIT_CAPTAIN_DEAD
 		s.morale[m] = maxf(0.0, s.morale[m] + hit)
 
 	# 3. spin decay, morale/hp retreat trigger (as BattleSim step 10), and

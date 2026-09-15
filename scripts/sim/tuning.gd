@@ -18,6 +18,9 @@ const FRICTION_MUD := 0.80
 const FRICTION_COBBLE := 0.98
 const MORALE_START := 0.8
 const MORALE_HIT_ALLY_DEATH := -0.02
+## Side size at which one ally death costs exactly MORALE_HIT_ALLY_DEATH; the hit
+## scales by MORALE_REF_SIDE / side size (BattleState.ally_death_hit).
+const MORALE_REF_SIDE := 60.0
 const MORALE_HIT_CAPTAIN_DEAD := -0.4
 const RETREAT_THRESHOLD := 0.25
 const RANK_MULT := [1.0, 1.25, 1.6, 2.2]
