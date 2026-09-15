@@ -47,6 +47,7 @@ static func _recruit(w: World, town_id: int, dt: float) -> void:
 			break
 		w.town_recruit[town_id] -= 1.0
 		w.town_pop[town_id] -= 1.0
+		Dissent.on_town_event(w, "levy", town_id)
 
 		if target == -1:
 			var tile := Vector2i(int(w.towns[town_id].x), int(w.towns[town_id].y))

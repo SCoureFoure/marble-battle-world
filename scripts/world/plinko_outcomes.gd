@@ -147,6 +147,8 @@ static func _raid(w: World, stack: int, f: int) -> String:
 	if town != -1:
 		Economy.raid_gold(w, stack, town)
 		w.town_state[town] = 1
+		if w.town_owner[town] >= 0:
+			Dissent.on_town_event(w, "raid", town)
 		w.town_owner[town] = -1
 		w.town_pop[town] *= 0.5
 		w.town_timer[town] = Tuning.RAID_RECOVER
@@ -154,6 +156,7 @@ static func _raid(w: World, stack: int, f: int) -> String:
 			if w.units.stack[u] == stack and w.units.alive[u] == 1:
 				w.units.xp[u] += 5
 		w.recompute_borders()
+		Dissent.on_stack_event(w, "raid", stack)
 	return "%s: RAID took %d" % [w.stacks.names[stack], town]
 
 
@@ -162,6 +165,8 @@ static func _raze(w: World, stack: int, f: int) -> String:
 	if town != -1:
 		Economy.raid_gold(w, stack, town)
 		w.town_state[town] = 2
+		if w.town_owner[town] >= 0:
+			Dissent.on_town_event(w, "raze", town)
 		w.town_owner[town] = -1
 		w.town_pop[town] = 0.0
 		w.town_timer[town] = Tuning.RAZE_RECOVER

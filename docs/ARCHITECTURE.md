@@ -1878,3 +1878,114 @@ is a target — a realm that stays united is as valid as one that breaks.
 
 - **RNG:** no draws from `w.rng`. Noise is deterministic, seeded from
   `w.rng.state` (or 0 if null) and unit identity, via a local hash-seeded `RandomNumberGenerator`.
+
+### 20.2 Drives and grievance (step 2)
+
+Heroes, captains and towns accumulate GRIEVANCE per drive axis when deeds
+are unavailable and it drains when deeds are performed. Grievance raises
+disaffection and erodes bond. Still a readings-only step: no outcome depends
+on grievance values.
+
+- **Fields:**
+  - `Units.griev` (`PackedFloat32Array`, size units.capacity * 4, index
+    `u*4+d` where d = 0 GLORY, 1 WEALTH, 2 FAITH, 3 LAND): grievance per
+    drive for unit u, 0..1 clamped; 0.0 until seeded.
+  - `World.town_griev` (`PackedFloat32Array`, size towns.size()): grievance
+    per town, 0..1 clamped; 0.0 until seeded.
+  - Save dict: `"griev"` under Units; `"town_griev"` under World. Load with
+    `has` guard (slots may not exist in older saves).
+
+- **Dissent additions (`scripts/world/dissent.gd`, all static):**
+  - `const DRIVE_AXES := [0, 2, 3, 4]`: maps grievance index d (0=GLORY,
+    1=WEALTH, 2=FAITH, 3=LAND) to value axis k (0=aggression, 2=greed,
+    3=piety, 4=cohesion; diplomacy axis 1 has no drive).
+  - `drive_strength(w, u, d) -> float`: unit u's value-axis strength for drive d
+    = `w.units.vals[u*5 + DRIVE_AXES[d]]`.
+  - `grievance(w, u) -> float`: unit u's overall grievance, drive-strength-weighted
+    average of its four per-drive grievances. Sum of all drive strengths ≤
+    0.0001 returns 0.0; else `Σ_d (strength_d * griev[u*4+d]) / Σ_d strength_d`.
+  - `on_town_event(w, kind, t, amount=1.0) -> void`: applies grievance delta
+    to town t. "raid" → `+TOWN_GRIEV_RAID`; "raze" → `+TOWN_GRIEV_RAZE`;
+    "levy" → `+TOWN_GRIEV_LEVY * amount`; "tax" → `+TOWN_GRIEV_TAX`;
+    any other → no-op. All clamped 0..1. No draws from `w.rng`.
+
+- **Tuning constants** (appended to Tuning after `POWER_LORD`):
+  ```
+  GRIEV_RISE := 0.0017                # per second at drive strength 1.0 (Glory, Land, Wealth while poor)
+  GRIEV_RISE_FAITH := 0.0008          # per second at drive strength 1.0
+  WEALTH_COMFORT := 1.0               # stack gold per man at or above which Wealth grievance drains
+  WEALTH_COMFORT_DRAIN := 0.0017
+  GLORY_WIN := 0.5
+  GLORY_FOUGHT := 0.15                # a lost battle still drains a little Glory
+  WEALTH_RAID := 0.4
+  FAITH_PILGRIM := 0.6
+  FAITH_SACRILEGE := 0.5              # razing adds this * faith strength
+  LAND_SETTLE := 0.3
+  GRIEV_WEIGHT := 0.5                 # disaffection += GRIEV_WEIGHT * grievance
+  BOND_GRIEV_DECAY := 0.003           # per second, bond -= this * grievance
+  TOWN_GRIEV_RAID := 0.4
+  TOWN_GRIEV_RAZE := 0.8
+  TOWN_GRIEV_LEVY := 0.002            # per recruit taken from the town
+  TOWN_GRIEV_TAX := 0.05              # per tax collection
+  TOWN_GRIEV_CALM := 0.0005           # per second while owned and INTACT
+  ```
+
+- **Grievance rise/drain rules per drive (in `tick`, once per world second):**
+  Every alive, active hero or captain u (same filter as bond service):
+  - Glory (d=0): `griev[u*4+0] += GRIEV_RISE * drive_strength(u, 0)` (clamped 0..1).
+  - Wealth (d=1): if stack u is in has gold per man `gpm < WEALTH_COMFORT`,
+    `griev[u*4+1] += GRIEV_RISE * drive_strength(u, 1)`;
+    else (comfortable) `griev[u*4+1] -= WEALTH_COMFORT_DRAIN` (clamped 0..1).
+  - Faith (d=2): `griev[u*4+2] += GRIEV_RISE_FAITH * drive_strength(u, 2)` (clamped 0..1).
+  - Land (d=3): `griev[u*4+3] += GRIEV_RISE * drive_strength(u, 3)` (clamped 0..1).
+  - After all four per-unit grievance lines, bond is updated:
+    `bond[u] = clampf(bond[u] - BOND_GRIEV_DECAY * grievance(w, u), 0, 1)`.
+
+  Every owned town t (after the `owner < 0: continue` guard):
+  - If `town_state[t] == 0` (INTACT): `town_griev[t] = max(0, town_griev[t] - TOWN_GRIEV_CALM)`.
+  - Then existing realm-pull logic.
+
+  **Note on raze timing:** a raze applies Faith spike value change (via `event_deltas`)
+  *before* the `grievance` rising logic reads faith strength in that same tick;
+  the spike affects the value that feeds `drive_strength`, and grievance deltas
+  from the deed (see below) apply in `on_stack_event` earlier in the deed's
+  timeline (M4 plinko path).
+
+- **Deed grievance deltas (in `on_stack_event`, per hero/captain in the stack):**
+  - "win": `griev[u*4+0] -= GLORY_WIN` (clamped 0..1).
+  - "retreat": `griev[u*4+0] -= GLORY_FOUGHT` (clamped 0..1).
+  - "raze": `griev[u*4+1] -= WEALTH_RAID`, `griev[u*4+2] += FAITH_SACRILEGE * drive_strength(u, 2)` (clamped 0..1).
+  - "raid": `griev[u*4+1] -= WEALTH_RAID` (clamped 0..1).
+  - "pilgrim": `griev[u*4+2] -= FAITH_PILGRIM` (clamped 0..1).
+  - "settle": `griev[u*4+3] -= LAND_SETTLE` (clamped 0..1).
+  - "raid" event_deltas (values on axes) stays five zeros.
+
+- **Town calm:** an INTACT town (state==0) owned by a faction gradually calms
+  each world tick via `town_griev[t] -= TOWN_GRIEV_CALM` (clamped to 0).
+
+- **Updated disaffection formulas:**
+  - `unit_disaffection(w, u) = distance(unit_vals, kingdom_vals) - BOND_WEIGHT * bond + GRIEV_WEIGHT * grievance(w, u)`
+    (was: `distance(...) - BOND_WEIGHT * bond` in §20).
+  - `town_disaffection(w, t) = distance(town_vals, kingdom_vals) + GRIEV_WEIGHT * town_griev[t]` if owned, else 0.0
+    (was: `distance(...)` if owned, 0.0 else in §20).
+
+- **Hook sites** (each calls `Dissent.on_stack_event` or `Dissent.on_town_event`):
+  - `scripts/world/plinko_outcomes.gd::_raid`: inside `if town != -1:`, before
+    `w.town_owner[town] = -1`: check `if w.town_owner[town] >= 0:`
+    `Dissent.on_town_event(w, "raid", town)`. Last line of same `if` block:
+    `Dissent.on_stack_event(w, "raid", stack)`.
+  - `scripts/world/plinko_outcomes.gd::_raze`: inside `if town != -1:`, before
+    `w.town_owner[town] = -1`: check `if w.town_owner[town] >= 0:`
+    `Dissent.on_town_event(w, "raze", town)`.
+  - `scripts/world/town_sim.gd::_recruit`: right after `w.town_pop[town_id] -= 1.0`:
+    `Dissent.on_town_event(w, "levy", town_id)`.
+  - `scripts/world/economy.gd::restock`: inside `if w.town_owner[t] == f:` (step 1),
+    first line: `if w.town_gold[t] > 0.0:` `Dissent.on_town_event(w, "tax", t)`.
+    After `w.town_pop[t] -= added`: `if w.town_owner[t] == f and added > 0:`
+    `Dissent.on_town_event(w, "levy", t, float(added))`.
+  - `scripts/world/settling.gd::found_town`: inside the `if cap >= 0:` block that
+    copies vals into town_vals, add after the loop: `w.units.griev[cap * 4 + 3] = 0.0`
+    (clear LAND grievance when a captain settles, as the deed is complete).
+
+- **RNG:** no draws from `w.rng`. Noise and randomness use none; all
+  grievance changes are deterministic deltas.

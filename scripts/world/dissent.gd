@@ -2,6 +2,7 @@ class_name Dissent extends RefCounted
 ## Values, bond and disaffection of heroes, captains, lords and towns (§20).
 
 enum Drive { GLORY = 0, WEALTH = 2, FAITH = 3, LAND = 4 }
+const DRIVE_AXES := [0, 2, 3, 4]  # grievance index d -> value axis (GLORY, WEALTH, FAITH, LAND)
 
 
 ## Kingdom-event value deltas per axis, keyed by event kind.
@@ -41,6 +42,25 @@ static func unit_vals(w: World, u: int) -> PackedFloat32Array:
 	return out
 
 
+## Unit `u`'s value-axis strength for drive `d` (§20.2).
+static func drive_strength(w: World, u: int, d: int) -> float:
+	var axis: int = DRIVE_AXES[d]
+	return w.units.vals[u * 5 + axis]
+
+
+## Unit `u`'s overall grievance: drive-strength-weighted average of its per-drive grievances (§20.2).
+static func grievance(w: World, u: int) -> float:
+	var sw := 0.0
+	for d in range(4):
+		sw += drive_strength(w, u, d)
+	if sw <= 0.0001:
+		return 0.0
+	var g := 0.0
+	for d in range(4):
+		g += drive_strength(w, u, d) * w.units.griev[u * 4 + d]
+	return g / sw
+
+
 ## Town `t`'s values on the 5 axes.
 static func town_vals(w: World, t: int) -> PackedFloat32Array:
 	var out := PackedFloat32Array()
@@ -74,6 +94,8 @@ static func seed_unit(w: World, u: int, src: PackedFloat32Array) -> void:
 	for k in range(5):
 		w.units.vals[u * 5 + k] = clampf(src[k] + Tuning.VALUE_SEED_SPREAD * n[k], 0.0, 1.0)
 	w.units.bond[u] = Tuning.BOND_INIT
+	for d in range(4):
+		w.units.griev[u * 4 + d] = 0.0
 
 
 ## True if unit `u` is an alive lord, or an alive active hero/captain.
@@ -101,6 +123,20 @@ static func on_stack_event(w: World, kind: String, stack: int) -> void:
 			w.units.bond[u] = clampf(w.units.bond[u] + Tuning.BOND_WIN, 0.0, 1.0)
 		elif kind == "retreat":
 			w.units.bond[u] = clampf(w.units.bond[u] - Tuning.BOND_LOSS, 0.0, 1.0)
+		match kind:
+			"win":
+				w.units.griev[u * 4 + 0] = clampf(w.units.griev[u * 4 + 0] - Tuning.GLORY_WIN, 0.0, 1.0)
+			"retreat":
+				w.units.griev[u * 4 + 0] = clampf(w.units.griev[u * 4 + 0] - Tuning.GLORY_FOUGHT, 0.0, 1.0)
+			"raze":
+				w.units.griev[u * 4 + 1] = clampf(w.units.griev[u * 4 + 1] - Tuning.WEALTH_RAID, 0.0, 1.0)
+				w.units.griev[u * 4 + 2] = clampf(w.units.griev[u * 4 + 2] + Tuning.FAITH_SACRILEGE * drive_strength(w, u, 2), 0.0, 1.0)
+			"raid":
+				w.units.griev[u * 4 + 1] = clampf(w.units.griev[u * 4 + 1] - Tuning.WEALTH_RAID, 0.0, 1.0)
+			"pilgrim":
+				w.units.griev[u * 4 + 2] = clampf(w.units.griev[u * 4 + 2] - Tuning.FAITH_PILGRIM, 0.0, 1.0)
+			"settle":
+				w.units.griev[u * 4 + 3] = clampf(w.units.griev[u * 4 + 3] - Tuning.LAND_SETTLE, 0.0, 1.0)
 
 
 ## Once-per-world-second update: member bond drifts toward 1.0; town values pull toward their lord and owner kingdom.
@@ -113,11 +149,23 @@ static func tick(w: World) -> void:
 		if w.units.hero[u] != 1 and w.units.is_captain[u] != 1:
 			continue
 		w.units.bond[u] = move_toward(w.units.bond[u], 1.0, Tuning.BOND_SERVICE_RATE)
+		var s: int = w.units.stack[u]
+		var gpm: float = w.stacks.gold[s] / maxf(1.0, float(w.stacks.count[s])) if s >= 0 else 0.0
+		w.units.griev[u * 4 + 0] = clampf(w.units.griev[u * 4 + 0] + Tuning.GRIEV_RISE * drive_strength(w, u, 0), 0.0, 1.0)
+		if gpm < Tuning.WEALTH_COMFORT:
+			w.units.griev[u * 4 + 1] = clampf(w.units.griev[u * 4 + 1] + Tuning.GRIEV_RISE * drive_strength(w, u, 1), 0.0, 1.0)
+		else:
+			w.units.griev[u * 4 + 1] = clampf(w.units.griev[u * 4 + 1] - Tuning.WEALTH_COMFORT_DRAIN, 0.0, 1.0)
+		w.units.griev[u * 4 + 2] = clampf(w.units.griev[u * 4 + 2] + Tuning.GRIEV_RISE_FAITH * drive_strength(w, u, 2), 0.0, 1.0)
+		w.units.griev[u * 4 + 3] = clampf(w.units.griev[u * 4 + 3] + Tuning.GRIEV_RISE * drive_strength(w, u, 3), 0.0, 1.0)
+		w.units.bond[u] = clampf(w.units.bond[u] - Tuning.BOND_GRIEV_DECAY * grievance(w, u), 0.0, 1.0)
 
 	for t in range(w.towns.size()):
 		var owner: int = w.town_owner[t]
 		if owner < 0:
 			continue
+		if w.town_state[t] == 0:
+			w.town_griev[t] = maxf(0.0, w.town_griev[t] - Tuning.TOWN_GRIEV_CALM)
 		var lord: int = w.town_lord[t]
 		if lord >= 0 and lord < w.units.n and w.units.alive[lord] == 1:
 			for k in range(5):
@@ -127,16 +175,29 @@ static func tick(w: World) -> void:
 			w.town_vals[t * 5 + k] = move_toward(w.town_vals[t * 5 + k], kvals[k], Tuning.TOWN_REALM_PULL)
 
 
-## Distance between unit `u`'s values and its kingdom's, offset by bond (may be negative).
+## Distance between unit `u`'s values and its kingdom's, offset by bond and raised by grievance (may be negative).
 static func unit_disaffection(w: World, u: int) -> float:
-	return distance(unit_vals(w, u), kingdom_vals(w, w.units.faction[u])) - Tuning.BOND_WEIGHT * w.units.bond[u]
+	return distance(unit_vals(w, u), kingdom_vals(w, w.units.faction[u])) - Tuning.BOND_WEIGHT * w.units.bond[u] + Tuning.GRIEV_WEIGHT * grievance(w, u)
 
 
-## Distance between town `t`'s values and its owner kingdom's; 0.0 if unowned.
+## Distance between town `t`'s values and its owner kingdom's, raised by grievance; 0.0 if unowned.
 static func town_disaffection(w: World, t: int) -> float:
 	if w.town_owner[t] < 0:
 		return 0.0
-	return distance(town_vals(w, t), kingdom_vals(w, w.town_owner[t]))
+	return distance(town_vals(w, t), kingdom_vals(w, w.town_owner[t])) + Tuning.GRIEV_WEIGHT * w.town_griev[t]
+
+
+## Applies grievance delta for town-level event `kind` to town `t`.
+static func on_town_event(w: World, kind: String, t: int, amount: float = 1.0) -> void:
+	match kind:
+		"raid":
+			w.town_griev[t] = clampf(w.town_griev[t] + Tuning.TOWN_GRIEV_RAID, 0.0, 1.0)
+		"raze":
+			w.town_griev[t] = clampf(w.town_griev[t] + Tuning.TOWN_GRIEV_RAZE, 0.0, 1.0)
+		"levy":
+			w.town_griev[t] = clampf(w.town_griev[t] + Tuning.TOWN_GRIEV_LEVY * amount, 0.0, 1.0)
+		"tax":
+			w.town_griev[t] = clampf(w.town_griev[t] + Tuning.TOWN_GRIEV_TAX, 0.0, 1.0)
 
 
 ## Political weight of unit `u`: lords and heroes fixed, captains scale with their stack's count.

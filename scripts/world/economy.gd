@@ -111,6 +111,8 @@ static func restock(w: World, s: int, t: int) -> String:
 
 	# (1) collect accrued gold if this is the stack's own town.
 	if w.town_owner[t] == f:
+		if w.town_gold[t] > 0.0:
+			Dissent.on_town_event(w, "tax", t)
 		w.stacks.gold[s] += w.town_gold[t]
 		w.town_gold[t] = 0.0
 
@@ -136,6 +138,8 @@ static func restock(w: World, s: int, t: int) -> String:
 	w.stacks.count[s] += added
 	w.stacks.gold[s] -= added * p
 	w.town_pop[t] -= added
+	if w.town_owner[t] == f and added > 0:
+		Dissent.on_town_event(w, "levy", t, float(added))
 	if w.town_owner[t] != f:
 		w.town_gold[t] = minf(Tuning.TOWN_GOLD_MAX, w.town_gold[t] + added * p)
 

@@ -130,6 +130,7 @@ static func found_town(w: World, s: int, tile: Vector2i) -> int:
 	if cap >= 0:
 		for k in range(5):
 			w.town_vals[t * 5 + k] = w.units.vals[cap * 5 + k]
+		w.units.griev[cap * 4 + 3] = 0.0
 
 	if owner != f:
 		w.stacks.faction[s] = owner

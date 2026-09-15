@@ -155,6 +155,24 @@ const BOND_LOSS := 0.03
 const BOND_WEIGHT := 0.25         # disaffection = distance - BOND_WEIGHT * bond
 const POWER_HERO := 5.0
 const POWER_LORD := 10.0
+# Dissent step 2 (§20.2): drives and grievance. Readings only.
+const GRIEV_RISE := 0.0017          # per second at drive strength 1.0 (Glory, Land, Wealth while poor)
+const GRIEV_RISE_FAITH := 0.0008    # per second at drive strength 1.0
+const WEALTH_COMFORT := 1.0         # stack gold per man at or above which Wealth grievance drains
+const WEALTH_COMFORT_DRAIN := 0.0017
+const GLORY_WIN := 0.5
+const GLORY_FOUGHT := 0.15          # a lost battle still drains a little Glory
+const WEALTH_RAID := 0.4
+const FAITH_PILGRIM := 0.6
+const FAITH_SACRILEGE := 0.5        # razing adds this * faith strength
+const LAND_SETTLE := 0.3
+const GRIEV_WEIGHT := 0.5           # disaffection += GRIEV_WEIGHT * grievance
+const BOND_GRIEV_DECAY := 0.003     # per second, bond -= this * grievance
+const TOWN_GRIEV_RAID := 0.4
+const TOWN_GRIEV_RAZE := 0.8
+const TOWN_GRIEV_LEVY := 0.002      # per recruit taken from the town
+const TOWN_GRIEV_TAX := 0.05        # per tax collection
+const TOWN_GRIEV_CALM := 0.0005     # per second while owned and INTACT
 const PLINKO_BIAS_GREED := 200.0
 const GOAL_PILGRIMAGE_BASE := 0.5
 const GOAL_AVENGE_BASE := 0.5

@@ -13,6 +13,7 @@ var town_timer: PackedFloat32Array
 var town_gold: PackedFloat32Array   # 0.0 (M9)
 var town_lord: PackedInt32Array     # -1 (M9)
 var town_vals: PackedFloat32Array  # towns*5, index t*5+k, same axes as ktraits (§20)
+var town_griev: PackedFloat32Array  # per town, 0..1 (§20.2)
 var units: Units
 var stacks: Stacks
 var pathing: Pathing
@@ -59,6 +60,7 @@ func _init() -> void:
 	town_gold = PackedFloat32Array()
 	town_lord = PackedInt32Array()
 	town_vals = PackedFloat32Array()
+	town_griev = PackedFloat32Array()
 	units = null
 	stacks = null
 	pathing = null
@@ -96,6 +98,7 @@ func setup_blank(cols: int, rows: int, seed: int) -> void:
 	town_gold = PackedFloat32Array()
 	town_lord = PackedInt32Array()
 	town_vals = PackedFloat32Array()
+	town_griev = PackedFloat32Array()
 	units = Units.new(2048)
 	stacks = Stacks.new(64)
 	pathing = Pathing.new(map)
@@ -399,6 +402,7 @@ func add_town(tile: Vector2i, owner: int) -> int:
 			town_vals.append(ktraits[owner * 5 + k])
 		else:
 			town_vals.append(Tuning.KTRAIT_INIT)
+	town_griev.append(0.0)
 	map.kind[map.idx(tile.x, tile.y)] = WorldMap.Kind.TOWN
 	return id
 
@@ -444,6 +448,11 @@ func sync_town_arrays() -> void:
 		town_vals.resize(n * 5)
 		for i in range(old, n * 5):
 			town_vals[i] = Tuning.KTRAIT_INIT
+	if town_griev.size() < n:
+		var old := town_griev.size()
+		town_griev.resize(n)
+		for i in range(old, n):
+			town_griev[i] = 0.0
 
 
 func bump(key: String) -> void:

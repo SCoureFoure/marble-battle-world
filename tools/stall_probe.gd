@@ -105,11 +105,26 @@ func _line(w: World, births: int, battles_started: int, t0: int) -> void:
 	var top_tension := Dissent.tension(w, top)
 	var top_members := 0
 	var top_bond_sum := 0.0
+	var top_glory_sum := 0.0
+	var top_wealth_sum := 0.0
+	var top_faith_sum := 0.0
+	var top_land_sum := 0.0
+	var top_griev_sum := 0.0
 	for u_m in range(w.units.n):
 		if Dissent.member(w, u_m) and w.units.faction[u_m] == top:
 			top_members += 1
 			top_bond_sum += w.units.bond[u_m]
+			top_glory_sum += w.units.griev[u_m * 4 + 0]
+			top_wealth_sum += w.units.griev[u_m * 4 + 1]
+			top_faith_sum += w.units.griev[u_m * 4 + 2]
+			top_land_sum += w.units.griev[u_m * 4 + 3]
+			top_griev_sum += Dissent.grievance(w, u_m)
 	var top_bond := 0.0 if top_members == 0 else top_bond_sum / float(top_members)
+	var top_glory := 0.0 if top_members == 0 else top_glory_sum / float(top_members)
+	var top_wealth := 0.0 if top_members == 0 else top_wealth_sum / float(top_members)
+	var top_faith := 0.0 if top_members == 0 else top_faith_sum / float(top_members)
+	var top_land := 0.0 if top_members == 0 else top_land_sum / float(top_members)
+	var top_griev := 0.0 if top_members == 0 else top_griev_sum / float(top_members)
 	var top_town_dis_sum := 0.0
 	var top_town_dis_count := 0
 	for t_dis in range(w.towns.size()):
@@ -117,6 +132,13 @@ func _line(w: World, births: int, battles_started: int, t0: int) -> void:
 			top_town_dis_sum += Dissent.town_disaffection(w, t_dis)
 			top_town_dis_count += 1
 	var top_town_dis := 0.0 if top_town_dis_count == 0 else top_town_dis_sum / float(top_town_dis_count)
+	var top_town_griev_sum := 0.0
+	var top_town_griev_count := 0
+	for t_griev in range(w.towns.size()):
+		if w.town_owner[t_griev] == top:
+			top_town_griev_sum += w.town_griev[t_griev]
+			top_town_griev_count += 1
+	var top_town_griev := 0.0 if top_town_griev_count == 0 else top_town_griev_sum / float(top_town_griev_count)
 	var max_tension := 0.0
 	var max_tension_f := -1
 	for f_max in range(w.faction_count):
@@ -125,10 +147,10 @@ func _line(w: World, births: int, battles_started: int, t0: int) -> void:
 			if tension > max_tension:
 				max_tension = tension
 				max_tension_f = f_max
-	print("PROBE t=%d factions_alive=%d real_factions=%d faction_count=%d towns=%d owned=%d top=%d top_towns=%d second_towns=%d top_unit_share=%.2f top_cohesion=%.2f top_split_cd=%.0f top_tension=%.3f top_members=%d top_bond=%.2f top_town_dis=%.3f max_tension=%.3f max_tension_f=%d stacks=%d top_stacks=%d at_cap=%d units=%d battles_now=%d battles_started=%d faction_births=%d breakaways=%d foundings=%d stacks_n=%d stack_recycles=%d units_n=%d unit_recycles=%d wall_s=%.0f" % [
+	print("PROBE t=%d factions_alive=%d real_factions=%d faction_count=%d towns=%d owned=%d top=%d top_towns=%d second_towns=%d top_unit_share=%.2f top_cohesion=%.2f top_split_cd=%.0f top_tension=%.3f top_members=%d top_bond=%.2f top_town_dis=%.3f max_tension=%.3f max_tension_f=%d top_griev=%.3f top_glory=%.2f top_wealth=%.2f top_faith=%.2f top_land=%.2f top_town_griev=%.3f stacks=%d top_stacks=%d at_cap=%d units=%d battles_now=%d battles_started=%d faction_births=%d breakaways=%d foundings=%d stacks_n=%d stack_recycles=%d units_n=%d unit_recycles=%d wall_s=%.0f" % [
 		int(w.time), alive, real, w.faction_count, w.towns.size(), owned, top, towns_by[top], second_towns,
 		float(units_by[top]) / maxf(1.0, float(units_alive)), w.ktrait(top, 4), w.split_cooldown[top],
-		top_tension, top_members, top_bond, top_town_dis, max_tension, max_tension_f,
+		top_tension, top_members, top_bond, top_town_dis, max_tension, max_tension_f, top_griev, top_glory, top_wealth, top_faith, top_land, top_town_griev,
 		stacks_alive, top_stacks, at_cap, units_alive, w.battles.size(), battles_started, births,
 		int(w.history.get("breakaways", 0)), int(w.history.get("foundings", 0)),
 		w.stacks.n, _sum(w.stacks.gen), w.units.n, _sum(w.units.gen),

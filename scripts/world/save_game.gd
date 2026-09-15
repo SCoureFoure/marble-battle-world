@@ -58,6 +58,7 @@ static func save(w: World, path: String) -> Error:
 		"reusable": w.units.reusable,
 		"vals": w.units.vals,
 		"bond": w.units.bond,
+		"griev": w.units.griev,
 		"looks": w.units.looks,
 	})
 
@@ -112,6 +113,7 @@ static func save(w: World, path: String) -> Error:
 		"town_gold": w.town_gold,
 		"town_lord": w.town_lord,
 		"town_vals": w.town_vals,
+		"town_griev": w.town_griev,
 	})
 
 	f.store_var({
@@ -208,6 +210,8 @@ static func load(path: String) -> World:
 	if units_dict.has("vals"):
 		w.units.vals = units_dict["vals"]
 		w.units.bond = units_dict["bond"]
+	if units_dict.has("griev"):
+		w.units.griev = units_dict["griev"]
 
 	w.stacks = Stacks.new(int(stacks_dict["cap"]))
 	w.stacks.n = stacks_dict["n"]
@@ -248,6 +252,8 @@ static func load(path: String) -> World:
 	w.town_lord = towns_dict["town_lord"]
 	if towns_dict.has("town_vals"):
 		w.town_vals = towns_dict["town_vals"]
+	if towns_dict.has("town_griev"):
+		w.town_griev = towns_dict["town_griev"]
 
 	w.ktraits = meta_dict["ktraits"]
 	w.relations = meta_dict["relations"]

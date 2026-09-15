@@ -34,6 +34,7 @@ var gen: PackedInt32Array            # 0; bumped each time this slot is recycled
 var reusable: PackedByteArray        # 0; 1 = dead and unreferenced, set by SlotSweep; consumed by add() once n == cap
 var vals: PackedFloat32Array        # cap*5, index u*5+k, same axes as World.ktraits; 0.0 until Dissent.seed_unit (§20)
 var bond: PackedFloat32Array        # 0.0; loyalty to own kingdom 0..1 (§20)
+var griev: PackedFloat32Array       # cap*4, index u*4+d (GLORY, WEALTH, FAITH, LAND), 0..1 (§20.2)
 
 
 func _init(capacity: int) -> void:
@@ -93,6 +94,8 @@ func _init(capacity: int) -> void:
 	reusable.fill(0)
 	vals.fill(0.0)
 	bond.fill(0.0)
+	griev.resize(capacity * 4)
+	griev.fill(0.0)
 
 	names = {}
 	looks = {}
@@ -141,6 +144,8 @@ func add(faction_: int, rank_: int, weapon_: int, captain: bool, stack_: int) ->
 	for k in range(5):
 		vals[idx*5 + k] = 0.0
 	bond[idx] = 0.0
+	for d in range(4):
+		griev[idx*4 + d] = 0.0
 
 	if idx == n: n += 1
 	return idx

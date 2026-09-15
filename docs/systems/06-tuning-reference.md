@@ -220,6 +220,23 @@ constant without updating the matching assertion turns that test red.
 | `BOND_WEIGHT` | `0.25` | dissent.gd | - | Multiplier applied to bond when computing disaffection; reduces disaffection by `BOND_WEIGHT * bond`. |
 | `POWER_HERO` | `5.0` | dissent.gd | - | Political weight of a hero (not captain, not lord). |
 | `POWER_LORD` | `10.0` | dissent.gd | - | Political weight of a lord. |
+| `GRIEV_RISE` | `0.0017` | dissent.gd | - | Grievance per second at drive strength 1.0 (Glory, Land, Wealth while poor). |
+| `GRIEV_RISE_FAITH` | `0.0008` | dissent.gd | - | Grievance per second at drive strength 1.0 (Faith). |
+| `WEALTH_COMFORT` | `1.0` | dissent.gd | - | Stack gold per man at or above which Wealth grievance drains instead of rises. |
+| `WEALTH_COMFORT_DRAIN` | `0.0017` | dissent.gd | - | Wealth grievance drained per second when stack exceeds comfort threshold. |
+| `GLORY_WIN` | `0.5` | dissent.gd | - | Glory grievance drained by a stack winning a battle. |
+| `GLORY_FOUGHT` | `0.15` | dissent.gd | - | Glory grievance drained by a stack retreating from battle (partial credit). |
+| `WEALTH_RAID` | `0.4` | dissent.gd | - | Wealth grievance drained by a stack raiding a town. |
+| `FAITH_PILGRIM` | `0.6` | dissent.gd | - | Faith grievance drained by a stack completing a pilgrimage. |
+| `FAITH_SACRILEGE` | `0.5` | dissent.gd | - | Multiplier on Faith drive strength added to Faith grievance when razing (sacrilege). |
+| `LAND_SETTLE` | `0.3` | dissent.gd | - | Land grievance drained by a stack settling a town. |
+| `GRIEV_WEIGHT` | `0.5` | dissent.gd | - | Multiplier applied to grievance when computing disaffection. |
+| `BOND_GRIEV_DECAY` | `0.003` | dissent.gd | - | Bond lost per second per unit of grievance (erosion from unmet drives). |
+| `TOWN_GRIEV_RAID` | `0.4` | dissent.gd | - | Town grievance added by being raided. |
+| `TOWN_GRIEV_RAZE` | `0.8` | dissent.gd | - | Town grievance added by being razed. |
+| `TOWN_GRIEV_LEVY` | `0.002` | dissent.gd | - | Town grievance added per recruit taken (multiplied by amount). |
+| `TOWN_GRIEV_TAX` | `0.05` | dissent.gd | - | Town grievance added by a tax collection. |
+| `TOWN_GRIEV_CALM` | `0.0005` | dissent.gd | - | Town grievance reduced per second while owned and intact (calming over time). |
 | `GOAL_PILGRIMAGE_BASE` | `0.5` | kingdoms.gd | - | Base weight of the pilgrimage AI goal before the piety trait is added. |
 | `GOAL_AVENGE_BASE` | `0.5` | kingdoms.gd | - | Base weight of the avenge AI goal before the extra avenge-trait bonus is added. |
 | `REL_CAPTAIN_KILLED` | `-0.5` | kingdoms.gd | - | Relation change applied against the killer's faction when a faction's captain is killed. |

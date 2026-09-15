@@ -163,7 +163,19 @@ have no bond). Three readings are computed from these values:
   low tension means the realm is aligned.
 
 Nothing in the simulation currently acts on these readings — they are observe-only.
-`tools/stall_probe.gd` prints the values `top_tension top_members top_bond
+
+**Drives and grievance.** Each hero and captain has a grievance meter per drive
+(Glory, Wealth, Faith, Land), driven by their unit value on the corresponding
+axis (aggression, greed, piety, cohesion). Grievance rises over time when a
+drive has no outlet (no recent deeds of that type); it drains when a deed is
+performed (battle win, raid, raze, pilgrimage, settlement). Towns accumulate
+grievance from raids, razes, levies and taxes, and calm down slowly in peace
+when owned and intact. A unit's overall grievance is a strength-weighted
+average of its four per-drive grievances. Grievance raises disaffection
+(adding to distance) and erodes bond over time. Like disaffection, grievance
+is a reading only: no outcome depends on its values.
+
+`tools/stall_probe.gd` prints the values `top_griev top_glory top_wealth top_faith top_land top_town_griev top_tension top_members top_bond
 top_town_dis max_tension max_tension_f` for debugging and tuning.
 
 Units are seeded when created (captain promotion, lineage succession) from
