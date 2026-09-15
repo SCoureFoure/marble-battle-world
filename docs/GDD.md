@@ -262,3 +262,9 @@ Player controls one captain lineage inside same sim. Same data, same loop. Playe
 - [ ] M6: LOD statistical battles, save/load, time slider, spectate panel, timeline.
 - [ ] M7: native port if needed.
 - [ ] Later (bookmarked 2026-09-13): battle camera auto-zoom — battle view zooms ~1.5–2.5× onto where fighting is happening and pans smoothly, so weapon silhouettes (drawn at true hitbox size, ARCHITECTURE §16.5) are readable. Rendering-only; sim unchanged. Alternative considered: marble radius 8 → 12.
+- [ ] Local economies (spec 2026-09-15: `docs/future-state-and-ideas/local-economies.md`), one step at a time:
+  - [ ] E1: town food + prosperity — farm yield from surrounding tiles, growth needs surplus, hunger shrinks pop and raises `town_griev`, tax scales with prosperity.
+  - [ ] E2: caravans — `Stacks.kind = CARAVAN`, food/wares deliveries between towns, trade raises prosperity and relations, PREY goal for poor armies, route cuts.
+  - [ ] E3: kingdom treasury (`faction_gold`), tithe split by greed, wages to armies, lords get Wealth/Land drives from their fief.
+  - [ ] E4: reinvestment — town buildings (FARMS, MARKET, WALLS, TEMPLE) chosen by lord or crown values; investing calms the town and pulls its values toward the investor.
+  - [ ] E5 (optional): villages as raidable map sites attached to towns.
