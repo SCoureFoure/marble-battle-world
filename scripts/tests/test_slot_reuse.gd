@@ -12,7 +12,7 @@ func _init() -> void:
 	# --- U: Units store ---
 	var u := Units.new(3)
 	t.check(u.add(0, 0, 0, false, -1) == 0 and u.add(0, 0, 0, false, -1) == 1 and u.add(0, 0, 0, false, -1) == 2, "U1: appends 0,1,2")
-	t.check(u.gen.size() == 3 and u.gen[0] == 0 and u.reusable.size() == 3 and u.reusable[1] == 0, "U1b: gen/reusable arrays zeroed")
+	t.check(u.gen.size() == 3 and u.gen[0] == 0 and u.reusable.size() == 3 and u.reusable[1] == 0 and u.left_for.size() == 3 and u.left_for[0] == -1, "U1b: gen/reusable arrays zeroed")
 	u.kill(1)
 	u.names[1] = "Old"
 	u.looks[1] = {"build": "x"}
@@ -24,12 +24,13 @@ func _init() -> void:
 	u.c_settles[1] = 1
 	u.kills[1] = 9
 	u.hero[1] = 1
+	u.left_for[1] = 2
 	u.reusable[1] = 1
 	var id := u.add(3, 2, 1, true, 7)
 	t.check(id == 1 and u.n == 3 and u.gen[1] == 1 and u.reusable[1] == 0, "U2: full store reuses marked slot, gen bumps")
 	t.check(u.alive[1] == 1 and u.faction[1] == 3 and u.rank[1] == 2 and u.weapon[1] == 1 and u.is_captain[1] == 1 and u.stack[1] == 7, "U2b: new occupant fields")
 	t.check(u.ctrait[1] == -1 and u.c_fights[1] == 0 and u.c_retreats[1] == 0 and u.c_razes[1] == 0 and u.c_settles[1] == 0
-		and u.kills[1] == 0 and u.hero[1] == 0, "U2c: old occupant traits/counters cleared")
+		and u.kills[1] == 0 and u.hero[1] == 0 and u.left_for[1] == -1, "U2c: old occupant traits/counters cleared")
 	t.check(not u.names.has(1) and not u.looks.has(1) and not u.dynasty.has(1), "U2d: old name/look/dynasty erased")
 	u.kill(0)
 	u.kill(2)

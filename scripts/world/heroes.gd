@@ -54,8 +54,15 @@ static func defect_chance(w: World, u: int) -> float:
 	return clampf(val, 0.05, 0.95)
 
 
+## Per-second breakaway chance for hero `u` (§20.3): BREAKAWAY_RATE scaled by
+## the hero's disaffection, clamped to [0, BREAKAWAY_RATE].
+static func breakaway_chance(w: World, u: int) -> float:
+	var dis: float = Dissent.unit_disaffection(w, u)
+	return Tuning.BREAKAWAY_RATE * clampf(dis / Tuning.BREAKAWAY_DIS_FULL, 0.0, 1.0)
+
+
 ## Called once per world second by the caller. Draws nothing for ineligible
-## units (checked before any rng use).
+## units or units with zero breakaway chance (checked before any rng use).
 static func check_breakaway(w: World) -> void:
 	var n0: int = w.units.n
 	for u in range(n0):
@@ -76,7 +83,10 @@ static func check_breakaway(w: World) -> void:
 		if w.time < w.units.pledge_t[u]:
 			continue
 
-		if w.rng.randf() < Tuning.BREAKAWAY_RATE:
+		var chance: float = breakaway_chance(w, u)
+		if chance <= 0.0:
+			continue
+		if w.rng.randf() < chance:
 			breakaway(w, u)
 
 
@@ -84,6 +94,7 @@ static func check_breakaway(w: World) -> void:
 ## defecting. Returns the new stack id, or -1 with no change and no rng
 ## draws when the stack table is full. `force_defect` (0/1) overrides the
 ## roll's *result* in step 4 (the roll is still drawn); -1 uses the roll.
+## Records the driving grievance in Units.left_for and relieves it by BREAKAWAY_RELIEF (§20.3).
 static func breakaway(w: World, u: int, force_defect: int = -1) -> int:
 	if not w.stacks.has_room():
 		return -1
@@ -93,6 +104,7 @@ static func breakaway(w: World, u: int, force_defect: int = -1) -> int:
 	var f: int = w.stacks.faction[s]
 	var c: int = w.stacks.count[s]
 	var parent_cap: int = w.stacks.captain_unit[s]
+	var why: int = Dissent.top_grievance(w, u)
 
 	# 2.
 	var want: int = mini(maxi(roundi(c * Tuning.FOLLOW_FRAC + w.units.kills[u] * Tuning.FOLLOW_PER_KILL), Tuning.BREAKAWAY_MIN_FOLLOWERS), c / 2)
@@ -155,6 +167,9 @@ static func breakaway(w: World, u: int, force_defect: int = -1) -> int:
 		w.units.leader[fu] = -1
 	w.units.is_captain[u] = 1
 	w.units.mentor[u] = parent_cap
+	w.units.left_for[u] = why if why >= 0 else Dissent.LEFT_OTHER
+	if why >= 0:
+		w.units.griev[u * 4 + why] *= (1.0 - Tuning.BREAKAWAY_RELIEF)
 	w.stacks.captain_unit[ns] = u
 
 	# 7.
@@ -170,12 +185,17 @@ static func breakaway(w: World, u: int, force_defect: int = -1) -> int:
 		w.stacks.immunity[s] = Tuning.RETREAT_IMMUNITY
 
 	# 9.
+	var seeking := ""
+	if why >= 0:
+		var word: String = Dissent.DRIVE_WORDS[why]
+		seeking = ", seeking " + word
+
 	if did_defect:
-		w.log_event("%s breaks from %s, founding the free company %s" % [w.units.names.get(u, "Unit %d" % u), str(w.faction_names[f]), str(w.faction_names[g])])
+		w.log_event(("%s breaks from %s, founding the free company %s" % [w.units.names.get(u, "Unit %d" % u), str(w.faction_names[f]), str(w.faction_names[g])]) + seeking)
 		w.bump("breakaways")
 		w.bump("defections")
 	else:
-		w.log_event("%s leaves %s with %d men" % [w.units.names.get(u, "Unit %d" % u), str(w.stacks.names[s]), followers.size()])
+		w.log_event(("%s leaves %s with %d men" % [w.units.names.get(u, "Unit %d" % u), str(w.stacks.names[s]), followers.size()]) + seeking)
 		w.bump("breakaways")
 
 	return ns

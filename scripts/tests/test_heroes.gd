@@ -1,6 +1,6 @@
 extends SceneTree
 ## Tests for Heroes.check_promote / promote / defect_chance / check_breakaway /
-## breakaway / successor. See .warboss-horde/slices/m9-heroes.md.
+## breakaway_chance / breakaway / successor. See .warboss-horde/slices/m9-heroes.md.
 
 const TestKit = preload("res://scripts/tests/test_kit.gd")
 
@@ -28,6 +28,15 @@ func mk_stack(w: World, f: int, tx: int, ty: int, n_units: int) -> int:
 	w.stacks.captain_unit[id] = cap_id
 	w.stacks.recount(w.units)
 	return id
+
+
+## Sets hero `u`'s five values to `v`, bond to `b`, and all four grievances to `g`.
+func set_mood(w: World, u: int, v: float, b: float, g: float) -> void:
+	for k in range(5):
+		w.units.vals[u * 5 + k] = v
+	w.units.bond[u] = b
+	for d in range(4):
+		w.units.griev[u * 4 + d] = g
 
 
 func _init() -> void:
@@ -285,6 +294,7 @@ func _init() -> void:
 	w9d.units.hero[h9d] = 1
 	w9d.units.career_start[h9d] = w9d.time - 100.0
 	w9d.stacks.recount(w9d.units)
+	set_mood(w9d, h9d, 0.5, 0.0, 1.0)
 	t.check(w9d.stacks.count[s9d] == 63, "case9d count == 63")
 
 	for k9 in range(1000):
@@ -293,6 +303,22 @@ func _init() -> void:
 
 	t.check(int(w9d.history.get("breakaways", 0)) == 1, "case9d breakaways == 1 after 1000 checks")
 	t.check(w9d.stacks.n == 2, "case9d stacks.n == 2")
+
+	# 9e. content hero (disaffection <= 0) never breaks away and draws nothing.
+	var w9e := mk_world()
+	var s9e := mk_stack(w9e, 0, 5, 4, 61)
+	var h9e := w9e.units.add(0, 0, 1, false, s9e)
+	w9e.units.hero[h9e] = 1
+	w9e.units.career_start[h9e] = w9e.time - 100.0
+	w9e.stacks.recount(w9e.units)
+	set_mood(w9e, h9e, 0.5, 1.0, 0.0)
+	var state_before9e := w9e.rng.state
+	for k9e in range(1000):
+		w9e.time += 1.0
+		Heroes.check_breakaway(w9e)
+	t.check(w9e.rng.state == state_before9e, "case9e content hero -> no draw in 1000 checks")
+	t.check(int(w9e.history.get("breakaways", 0)) == 0, "case9e breakaways == 0")
+	t.check(w9e.stacks.n == 1, "case9e stacks.n == 1")
 
 	# 10. successor (build stacks by hand).
 	var w10 := mk_world()
@@ -335,6 +361,105 @@ func _init() -> void:
 	var s10e := w10.stacks.add(0, 0.0, 0.0, "S10e")
 	w10.stacks.captain_unit[s10e] = u10e
 	t.check(Heroes.successor(w10, u10e, s10e) == -1, "case10e stale captain_unit == u skips step 2, falls to offshoots -> -1")
+
+	# 11. breakaway_chance scales with disaffection, clamped.
+	var w11 := mk_world()
+	var s11 := mk_stack(w11, 0, 5, 4, 10)
+	var h11 := w11.units.add(0, 0, 1, false, s11)
+	w11.units.hero[h11] = 1
+	t.check(t.approx(Dissent.kingdom_vals(w11, 0)[0], 0.5), "case11 kingdom values 0.5")
+	set_mood(w11, h11, 0.5, 0.0, 0.5)
+	t.check(t.approx(Heroes.breakaway_chance(w11, h11), 0.01), "case11 dis 0.25 -> 0.01")
+	set_mood(w11, h11, 0.5, 0.0, 1.0)
+	t.check(t.approx(Heroes.breakaway_chance(w11, h11), 0.02), "case11 dis 0.5 -> 0.02")
+	set_mood(w11, h11, 0.5, 1.0, 0.0)
+	t.check(t.approx(Heroes.breakaway_chance(w11, h11), 0.0), "case11 dis -0.25 -> 0.0")
+	set_mood(w11, h11, 1.0, 0.0, 1.0)
+	t.check(t.approx(Heroes.breakaway_chance(w11, h11), 0.02), "case11 dis 1.0 clamps -> 0.02")
+	set_mood(w11, h11, 0.5, 0.5, 0.75)
+	t.check(t.approx(Heroes.breakaway_chance(w11, h11), 0.01), "case11 dis 0.25 (bond 0.5, griev 0.75) -> 0.01")
+
+	# 12. breakaway relief by motive, stored.
+	# 12a: loyal, equal strengths
+	var w12a := mk_world()
+	var s12a := mk_stack(w12a, 0, 5, 4, 60)
+	var h12a := w12a.units.add(0, 0, 1, false, s12a)
+	w12a.units.hero[h12a] = 1
+	w12a.units.career_start[h12a] = w12a.time - 100.0
+	w12a.stacks.recount(w12a.units)
+	set_mood(w12a, h12a, 0.5, 0.0, 0.0)
+	w12a.units.griev[h12a * 4 + 0] = 0.2
+	w12a.units.griev[h12a * 4 + 1] = 0.8
+	w12a.units.griev[h12a * 4 + 2] = 0.4
+	w12a.units.griev[h12a * 4 + 3] = 0.6
+
+	t.check(Dissent.top_grievance(w12a, h12a) == 1, "case12a top grievance wealth")
+	t.check(w12a.units.left_for[h12a] == -1, "case12a never left -> -1")
+	var ns12a := Heroes.breakaway(w12a, h12a, 0)
+	t.check(ns12a != -1, "case12a breakaway != -1")
+	t.check(w12a.units.left_for[h12a] == 1, "case12a left_for == 1")
+	t.check(t.approx(w12a.units.griev[h12a * 4 + 0], 0.2), "case12a griev d=0")
+	t.check(t.approx(w12a.units.griev[h12a * 4 + 1], 0.4), "case12a griev d=1")
+	t.check(t.approx(w12a.units.griev[h12a * 4 + 2], 0.4), "case12a griev d=2")
+	t.check(t.approx(w12a.units.griev[h12a * 4 + 3], 0.6), "case12a griev d=3")
+	var last12a := String(w12a.events_log[w12a.events_log.size() - 1])
+	t.check(last12a.ends_with(", seeking wealth"), "case12a log ends_with seeking wealth")
+	t.check(last12a.begins_with(str(w12a.units.names.get(h12a, "Unit %d" % h12a)) + " leaves S with "), "case12a log begins_with hero name and leaves")
+
+	# 12b: strength beats raw grievance, defecting
+	var w12b := mk_world()
+	var s12b := mk_stack(w12b, 0, 5, 4, 60)
+	var h12b := w12b.units.add(0, 0, 1, false, s12b)
+	w12b.units.hero[h12b] = 1
+	w12b.units.career_start[h12b] = w12b.time - 100.0
+	w12b.stacks.recount(w12b.units)
+	set_mood(w12b, h12b, 0.5, 0.0, 0.0)
+	w12b.units.vals[h12b * 5 + 0] = 1.0
+	w12b.units.vals[h12b * 5 + 2] = 0.2
+	w12b.units.griev[h12b * 4 + 0] = 0.5
+	w12b.units.griev[h12b * 4 + 1] = 0.8
+	w12b.units.griev[h12b * 4 + 2] = 0.0
+	w12b.units.griev[h12b * 4 + 3] = 0.0
+
+	t.check(Dissent.top_grievance(w12b, h12b) == 0, "case12b strength-weighted: glory (0.5) beats wealth (0.16)")
+	var ns12b := Heroes.breakaway(w12b, h12b, 1)
+	t.check(w12b.units.left_for[h12b] == 0, "case12b left_for == 0")
+	t.check(t.approx(w12b.units.griev[h12b * 4 + 0], 0.25), "case12b griev d=0")
+	t.check(t.approx(w12b.units.griev[h12b * 4 + 1], 0.8), "case12b griev d=1")
+	var last12b := String(w12b.events_log[w12b.events_log.size() - 1])
+	t.check(last12b.ends_with(", seeking glory"), "case12b log ends_with seeking glory")
+	t.check(last12b.contains(" breaks from Alpha, founding the free company "), "case12b log contains breaks from Alpha")
+
+	# 12c: tie -> lowest index
+	var w12c := mk_world()
+	var s12c := mk_stack(w12c, 0, 5, 4, 60)
+	var h12c := w12c.units.add(0, 0, 1, false, s12c)
+	w12c.units.hero[h12c] = 1
+	w12c.units.career_start[h12c] = w12c.time - 100.0
+	w12c.stacks.recount(w12c.units)
+	set_mood(w12c, h12c, 0.5, 0.0, 0.3)
+
+	t.check(Dissent.top_grievance(w12c, h12c) == 0, "case12c tie -> lowest index")
+
+	# 12d: no grievance
+	var w12d := mk_world()
+	var s12d := mk_stack(w12d, 0, 5, 4, 60)
+	var h12d := w12d.units.add(0, 0, 1, false, s12d)
+	w12d.units.hero[h12d] = 1
+	w12d.units.career_start[h12d] = w12d.time - 100.0
+	w12d.stacks.recount(w12d.units)
+	set_mood(w12d, h12d, 0.5, 0.0, 0.0)
+
+	t.check(Dissent.top_grievance(w12d, h12d) == -1, "case12d top_grievance == -1")
+	var ns12d := Heroes.breakaway(w12d, h12d, 0)
+	t.check(w12d.units.left_for[h12d] == Dissent.LEFT_OTHER, "case12d left_for == LEFT_OTHER")
+	t.check(w12d.units.left_for[h12d] == 4, "case12d left_for == 4")
+	var last12d := String(w12d.events_log[w12d.events_log.size() - 1])
+	t.check(not last12d.contains("seeking"), "case12d log does NOT contain seeking")
+	t.check(t.approx(w12d.units.griev[h12d * 4 + 0], 0.0), "case12d griev d=0")
+	t.check(t.approx(w12d.units.griev[h12d * 4 + 1], 0.0), "case12d griev d=1")
+	t.check(t.approx(w12d.units.griev[h12d * 4 + 2], 0.0), "case12d griev d=2")
+	t.check(t.approx(w12d.units.griev[h12d * 4 + 3], 0.0), "case12d griev d=3")
 
 	t.finish()
 	quit()

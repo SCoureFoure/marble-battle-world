@@ -3,6 +3,8 @@ class_name Dissent extends RefCounted
 
 enum Drive { GLORY = 0, WEALTH = 2, FAITH = 3, LAND = 4 }
 const DRIVE_AXES := [0, 2, 3, 4]  # grievance index d -> value axis (GLORY, WEALTH, FAITH, LAND)
+const LEFT_OTHER := 4  # Units.left_for value: broke away with no positive grievance
+const DRIVE_WORDS := ["glory", "wealth", "faith", "land"]  # grievance index d -> log word
 
 
 ## Kingdom-event value deltas per axis, keyed by event kind.
@@ -59,6 +61,18 @@ static func grievance(w: World, u: int) -> float:
 	for d in range(4):
 		g += drive_strength(w, u, d) * w.units.griev[u * 4 + d]
 	return g / sw
+
+
+## Grievance index d (0..3) with the largest drive_strength * griev; ties keep the lowest d; -1 if none is > 0 (§20.3).
+static func top_grievance(w: World, u: int) -> int:
+	var best := -1
+	var best_p := 0.0
+	for d in range(4):
+		var p: float = drive_strength(w, u, d) * w.units.griev[u * 4 + d]
+		if p > best_p:
+			best_p = p
+			best = d
+	return best
 
 
 ## Town `t`'s values on the 5 axes.

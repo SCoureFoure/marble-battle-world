@@ -128,6 +128,7 @@ func _init() -> void:
 	w_m9.units.career_start[uid1] = 12.5
 	w_m9.units.ambition[uid1] = 0.25
 	w_m9.units.mentor[uid1] = 0
+	w_m9.units.left_for[uid1] = 3
 	w_m9.units.fate[0] = Units.Fate.RETIRED
 	w_m9.stacks.gold[sid_m9] = 33.5
 	w_m9.town_gold[0] = 7.25
@@ -141,6 +142,8 @@ func _init() -> void:
 	t.check(t.approx(w_m9_2.units.career_start[uid1], 12.5), "round-trip: units.career_start[uid1] approx 12.5")
 	t.check(t.approx(w_m9_2.units.ambition[uid1], 0.25), "round-trip: units.ambition[uid1] approx 0.25")
 	t.check(w_m9_2.units.mentor[uid1] == 0, "round-trip: units.mentor[uid1] == 0")
+	t.check(w_m9_2.units.left_for[uid1] == 3, "round-trip: units.left_for[uid1] == 3")
+	t.check(w_m9_2.units.left_for[0] == -1, "round-trip: units.left_for[0] == -1")
 	t.check(w_m9_2.units.fate[0] == Units.Fate.RETIRED, "round-trip: units.fate[0] == Units.Fate.RETIRED")
 	t.check(t.approx(w_m9_2.stacks.gold[sid_m9], 33.5), "round-trip: stacks.gold[sid_m9] approx 33.5")
 	t.check(t.approx(w_m9_2.town_gold[0], 7.25), "round-trip: town_gold[0] approx 7.25")

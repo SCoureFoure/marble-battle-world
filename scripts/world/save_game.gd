@@ -59,6 +59,7 @@ static func save(w: World, path: String) -> Error:
 		"vals": w.units.vals,
 		"bond": w.units.bond,
 		"griev": w.units.griev,
+		"left_for": w.units.left_for,
 		"looks": w.units.looks,
 	})
 
@@ -212,6 +213,8 @@ static func load(path: String) -> World:
 		w.units.bond = units_dict["bond"]
 	if units_dict.has("griev"):
 		w.units.griev = units_dict["griev"]
+	if units_dict.has("left_for"):
+		w.units.left_for = units_dict["left_for"]
 
 	w.stacks = Stacks.new(int(stacks_dict["cap"]))
 	w.stacks.n = stacks_dict["n"]

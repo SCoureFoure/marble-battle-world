@@ -1472,6 +1472,7 @@ const HERO_KILLS := 25
 const BREAKAWAY_MIN_STACK := 40
 const BREAKAWAY_DELAY := 30.0
 const BREAKAWAY_RATE := 0.02
+const BREAKAWAY_DIS_FULL := 0.5
 const FOLLOW_FRAC := 0.15
 const FOLLOW_PER_KILL := 0.5
 const BREAKAWAY_MIN_FOLLOWERS := 8
@@ -1571,16 +1572,17 @@ gains `gold`; towns dict gains `town_gold, town_lord`; logs dict gains `history`
   `outshine = 1.0 if cap >= 0 and kills[u] > kills[cap] else 0.0`;
   `clampf(DEFECT_BASE + DEFECT_AMBITION*ambition - DEFECT_COHESION*(ktrait(f,4)-0.5)
   - DEFECT_PIETY*(ktrait(f,3)-0.5) + DEFECT_OUTSHINE*outshine, 0.05, 0.95)`.
+- `breakaway_chance(w, u) -> float`: `BREAKAWAY_RATE * clamp(Dissent.unit_disaffection(w, u) / BREAKAWAY_DIS_FULL, 0, 1)`.
 - `check_breakaway(w)` (once per world second): `n0 = units.n`; for `u` in `0..n0-1`
   ascending, eligible when `alive == 1, hero == 1, is_captain == 0, fate == ACTIVE`,
   `s = stack[u] >= 0`, `stacks.alive[s] == 1`, `state[s]` IDLE or MOVING,
   `count[s] >= BREAKAWAY_MIN_STACK`, `w.time - career_start[u] >= BREAKAWAY_DELAY`
   (evaluated at that moment, so earlier breakaways this pass count). Eligible →
-  `if w.rng.randf() < BREAKAWAY_RATE: breakaway(w, u)`.
+  `chance = breakaway_chance(w, u); if chance > 0: if w.rng.randf() < chance: breakaway(w, u)`.
 - `breakaway(w, u, force_defect := -1) -> int` (new stack id, or -1 with no change and no
   draws when `stacks.n >= stacks.cap`). `force_defect` 0/1 overrides the roll's result in
   step 4 (the roll is still drawn); -1 uses it. Only tests pass it.
-  1. `s = stack[u]`, `f = faction[s]`, `c = count[s]`, `parent_cap = captain_unit[s]`.
+  1. `why = Dissent.top_grievance(w, u)`. `s = stack[u]`, `f = faction[s]`, `c = count[s]`, `parent_cap = captain_unit[s]`.
   2. `want = mini(maxi(int(round(c*FOLLOW_FRAC + kills[u]*FOLLOW_PER_KILL)), BREAKAWAY_MIN_FOLLOWERS), c / 2)`.
   3. pool = alive units of `s`, `is_captain == 0`, `hero == 0`, ascending id. Partial
      Fisher–Yates: for `k` in `0..mini(want, pool.size())-1`: `j = w.rng.randi_range(k, pool.size()-1)`, swap `k,j`. Followers = first `mini(want, pool.size())`.
@@ -1590,13 +1592,14 @@ gains `gold`; towns dict gains `town_gold, town_lord`; logs dict gains `history`
   5. Tile: first of `World._passable_neighbours(w.map, stack_tile(s))`, else `stack_tile(s)`.
      `ns = stacks.add(g, centre.x, centre.y, NameGen.stack_name(w.rng))`.
   6. `u` and followers: `stack = ns`, `faction = g`. `is_captain[u] = 1`, `mentor[u] =
-     parent_cap`, `captain_unit[ns] = u`.
+     parent_cap`, `captain_unit[ns] = u`. `left_for[u] = why`; apply relief:
+     `griev[u*4 + why] -= BREAKAWAY_RELIEF * drive_strength(u, why)` (clamped 0..1).
   7. `moved = followers.size() + 1`; `share = gold[s] * moved / c`; `gold[s] -= share;
      gold[ns] += share`. `stacks.recount(units)`.
   8. `immunity[ns] = RETREAT_IMMUNITY`; if `g != f` also `immunity[s] = RETREAT_IMMUNITY`.
-  9. Loyal: log `"%s leaves %s with %d men" % [names[u], stacks.names[s], followers.size()]`,
-     `bump("breakaways")`. Defected: log `"%s breaks from %s, founding the free company %s"
-     % [names[u], faction_names[f], faction_names[g]]`, `bump("breakaways")` and `bump("defections")`.
+  9. Loyal: log `"%s leaves %s with %d men, seeking %s" % [names[u], stacks.names[s], followers.size(), DRIVE_WORDS[why]]`,
+     `bump("breakaways")`. Defected: log `"%s breaks from %s, founding the free company %s, seeking %s"
+     % [names[u], faction_names[f], faction_names[g], DRIVE_WORDS[why]]`, `bump("breakaways")` and `bump("defections")`.
 - `successor(w, u, last_stack) -> int` (follow legacy):
   1. `u >= 0`, `alive == 1`, `fate == ACTIVE`, `stack >= 0` → `u`.
   2. `0 <= last_stack < stacks.n`, `stacks.alive == 1`, `c = captain_unit[last_stack]`,
@@ -1890,9 +1893,12 @@ on grievance values.
   - `Units.griev` (`PackedFloat32Array`, size units.capacity * 4, index
     `u*4+d` where d = 0 GLORY, 1 WEALTH, 2 FAITH, 3 LAND): grievance per
     drive for unit u, 0..1 clamped; 0.0 until seeded.
+  - `Units.left_for` (`PackedInt32Array`, size units.capacity): drive id (0..3)
+    of the unmet drive that pushed a breakaway hero out, or -1 if not a breakaway;
+    filled -1, reset to -1 in `add`, save key `left_for` (optional on load).
   - `World.town_griev` (`PackedFloat32Array`, size towns.size()): grievance
     per town, 0..1 clamped; 0.0 until seeded.
-  - Save dict: `"griev"` under Units; `"town_griev"` under World. Load with
+  - Save dict: `"griev"` and `"left_for"` under Units; `"town_griev"` under World. Load with
     `has` guard (slots may not exist in older saves).
 
 - **Dissent additions (`scripts/world/dissent.gd`, all static):**
@@ -1928,6 +1934,7 @@ on grievance values.
   TOWN_GRIEV_LEVY := 0.002            # per recruit taken from the town
   TOWN_GRIEV_TAX := 0.05              # per tax collection
   TOWN_GRIEV_CALM := 0.0005           # per second while owned and INTACT
+  BREAKAWAY_RELIEF := 0.5             # multiplicative relief applied to a drive's grievance when a hero breaks away for that drive
   ```
 
 - **Grievance rise/drain rules per drive (in `tick`, once per world second):**
@@ -1989,3 +1996,38 @@ on grievance values.
 
 - **RNG:** no draws from `w.rng`. Noise and randomness use none; all
   grievance changes are deterministic deltas.
+
+### 20.3 Outlets: grievance-driven breakaway (step 3a)
+
+Hero breakaway chance per second is no longer a flat `BREAKAWAY_RATE`. It is now:
+`breakaway_chance(w, u) = BREAKAWAY_RATE * clamp(Dissent.unit_disaffection(w, u) / BREAKAWAY_DIS_FULL, 0, 1)`.
+
+No RNG draw is made when the chance is 0. A content hero (disaffection <= 0) never
+breaks away. All eligibility gates (hero, not captain, ACTIVE, stack IDLE/MOVING,
+count >= BREAKAWAY_MIN_STACK, BREAKAWAY_DELAY, pledge) remain unchanged. `defect_chance`
+and `breakaway` are unchanged.
+
+This is the first outlet: dissent readings now change behaviour.
+
+### 20.3b Relief by motive
+
+When a hero breaks away, they record which unmet drive pushed them out in
+`left_for[u]`. The grievance on that specific drive is relieved by the deed:
+`top_grievance` (defined below) returns the drive index d (0 GLORY, 1 WEALTH,
+2 FAITH, 3 LAND) with the highest grievance, strength-weighted (ties broken
+toward lowest drive id), or -1 if no grievance exists; the `breakaway` step 6
+writes `left_for = top_grievance(w, u)` and applies `BREAKAWAY_RELIEF *
+drive_strength(u, d)` directly to `griev[u*4 + d]`, lowering grievance as if
+the hero had achieved an outlet. Both loyal and defecting breakaways receive
+this relief. The `left_for` field is kept for later use (e.g. rally rejoins,
+rebellion chronicles) but nothing reads it in this step.
+
+- **Dissent additions** (append to the API list in §20 if it exists):
+  - `const LEFT_OTHER := 4`: a marker indicating breakaway for reasons other
+    than a single unmet drive (not currently used; reserved for future features).
+  - `const DRIVE_WORDS := ["glory", "wealth", "faith", "land"]`: log display
+    names for the four drives, indexed by drive id 0..3.
+  - `top_grievance(w, u) -> int`: returns the drive index d (0..3) with the
+    highest grievance in `griev[u*4 + d]`, strength-weighted by
+    `drive_strength(w, u, d)`. Ties broken toward lowest d. If all four
+    grievances are <= 0, returns -1.

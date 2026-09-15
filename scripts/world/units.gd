@@ -35,6 +35,7 @@ var reusable: PackedByteArray        # 0; 1 = dead and unreferenced, set by Slot
 var vals: PackedFloat32Array        # cap*5, index u*5+k, same axes as World.ktraits; 0.0 until Dissent.seed_unit (§20)
 var bond: PackedFloat32Array        # 0.0; loyalty to own kingdom 0..1 (§20)
 var griev: PackedFloat32Array       # cap*4, index u*4+d (GLORY, WEALTH, FAITH, LAND), 0..1 (§20.2)
+var left_for: PackedInt32Array     # -1 = never broke away; 0..3 = grievance index that drove the breakaway; 4 = Dissent.LEFT_OTHER (§20.3)
 
 
 func _init(capacity: int) -> void:
@@ -96,6 +97,8 @@ func _init(capacity: int) -> void:
 	bond.fill(0.0)
 	griev.resize(capacity * 4)
 	griev.fill(0.0)
+	left_for.resize(capacity)
+	left_for.fill(-1)
 
 	names = {}
 	looks = {}
@@ -146,6 +149,7 @@ func add(faction_: int, rank_: int, weapon_: int, captain: bool, stack_: int) ->
 	bond[idx] = 0.0
 	for d in range(4):
 		griev[idx*4 + d] = 0.0
+	left_for[idx] = -1
 
 	if idx == n: n += 1
 	return idx

@@ -209,6 +209,9 @@ constant without updating the matching assertion turns that test red.
 | `KT_RETREAT_AGGR` | `-0.02` | kingdoms.gd | - | Aggression trait change applied to a faction on retreating from battle. |
 | `KT_RETREAT_COH` | `-0.02` | kingdoms.gd | - | Cohesion trait change applied to a faction on retreating from battle. |
 | `KT_PILGRIM_PIETY` | `0.05` | kingdoms.gd | - | Piety trait change applied to a faction on completing a pilgrimage. |
+| `BREAKAWAY_RATE` | `0.02` | heroes.gd | - | Max per-second breakaway chance, reached at BREAKAWAY_DIS_FULL disaffection. |
+| `BREAKAWAY_DIS_FULL` | `0.5` | heroes.gd | - | Unit disaffection at which breakaway chance reaches BREAKAWAY_RATE (clamped 0..1). |
+| `BREAKAWAY_RELIEF` | `0.5` | heroes.gd | - | Multiplicative relief applied to a drive's grievance when a hero breaks away for that drive. |
 | `VALUE_SEED_SPREAD` | `0.15` | dissent.gd | - | Max +/- noise applied to a newly seeded unit or town value. |
 | `HERO_EVENT_SCALE` | `2.0` | dissent.gd | - | Multiplier applied to kingdom event deltas when updating hero/captain values. |
 | `TOWN_REALM_PULL` | `0.002` | dissent.gd | - | Per second, rate town values drift toward their owner kingdom's values. |

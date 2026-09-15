@@ -145,7 +145,7 @@ sides as a loser (`result["winner_side"]` records which local side won).
 The bridge itself is out of this slice's source files — full mechanics in
 [Overworld](02-overworld.md).
 
-### Dissent and allegiance (observe only)
+### Dissent and allegiance
 
 Heroes, captains, lords and towns hold values on the same 5 axes (aggression,
 diplomacy, greed, piety, cohesion) as their faction's kingdom traits. Each has
@@ -155,6 +155,7 @@ have no bond). Three readings are computed from these values:
 - **Unit disaffection** (`scripts/world/dissent.gd::unit_disaffection`):
   distance between a unit's values and its kingdom's, reduced by the unit's bond.
   Negative values mean the unit is more loyal than its values would suggest.
+  Disaffection directly drives hero breakaway chance (see [ARCHITECTURE](../ARCHITECTURE.md) §20.3).
 - **Town disaffection** (`scripts/world/dissent.gd::town_disaffection`):
   distance between a town's values and its owner kingdom's; 0.0 if unowned.
 - **Faction tension** (`scripts/world/dissent.gd::tension`):
@@ -162,7 +163,8 @@ have no bond). Three readings are computed from these values:
   members and towns. High tension means substantial disagreement exists;
   low tension means the realm is aligned.
 
-Nothing in the simulation currently acts on these readings — they are observe-only.
+Unit disaffection directly drives hero breakaway: `breakaway_chance = BREAKAWAY_RATE * clamp(disaffection / BREAKAWAY_DIS_FULL, 0, 1)`.
+Town disaffection and faction tension are observe-only — no outcome currently depends on their values.
 
 **Drives and grievance.** Each hero and captain has a grievance meter per drive
 (Glory, Wealth, Faith, Land), driven by their unit value on the corresponding
@@ -174,6 +176,15 @@ when owned and intact. A unit's overall grievance is a strength-weighted
 average of its four per-drive grievances. Grievance raises disaffection
 (adding to distance) and erodes bond over time. Like disaffection, grievance
 is a reading only: no outcome depends on its values.
+
+**Breakaway relief.** When a hero breaks away due to high disaffection, the system
+identifies their highest-grievance unmet drive (strength-weighted, with ties
+broken toward lower drive ids) and records it. The event log names it:
+`"seeking glory"`, `"seeking wealth"`, etc. The act of breaking away provides
+immediate relief on that drive, reducing its grievance by a multiplicative
+factor (`BREAKAWAY_RELIEF`, default 0.5x the strength contribution). Raising
+this tuning constant makes heroes calmer immediately after leaving, reducing
+the chance they break again soon.
 
 `tools/stall_probe.gd` prints the values `top_griev top_glory top_wealth top_faith top_land top_town_griev top_tension top_members top_bond
 top_town_dis max_tension max_tension_f` for debugging and tuning.
@@ -217,6 +228,8 @@ instead); `kingdom_name` = onset+onset+suffix; `legend_name(rng, kills)` =
 | `KT_RETREAT_AGGR` | `-0.02` | Retreating drops aggression faster. |
 | `KT_RETREAT_COH` | `-0.02` | Retreating drops cohesion faster. |
 | `KT_PILGRIM_PIETY` | `0.05` | Completing a pilgrimage raises piety faster. |
+| `BREAKAWAY_RATE` | `0.02` | A hero's maximum per-second breakaway chance (reached at BREAKAWAY_DIS_FULL disaffection). |
+| `BREAKAWAY_DIS_FULL` | `0.5` | The disaffection level at which a hero's breakaway chance reaches BREAKAWAY_RATE (values below clamp to 0 chance). |
 | `PLINKO_BIAS_GREED` | `200.0` | A greedy kingdom's plinko drops get pushed toward gold-heavy slots harder. |
 | `GOAL_PILGRIMAGE_BASE` | `0.5` | Stacks pick the PILGRIMAGE goal more often even at zero piety. |
 | `GOAL_AVENGE_BASE` | `0.5` | Stacks pick the AVENGE goal more often even with no grudge. |
@@ -252,6 +265,9 @@ instead); `kingdom_name` = onset+onset+suffix; `legend_name(rng, kills)` =
   ledger/spectate panel. Pinned by `test_kingdoms` (`tick: relation(0,1)
   approx -0.58 after decay`) — update the test too. Re-run:
   `bash tools/verify.sh test_kingdoms`.
+- **Want fewer hero breakaways?** Raise `BREAKAWAY_DIS_FULL` (current `0.5`) so
+  heroes must accumulate more disaffection before they become likely to leave.
+  Watch captains breaking away with contingents in the events log.
 - **Want civil wars (splits) to happen sooner?** Lower `SPLIT_UNITS` (current
   `600`) or raise `SPLIT_COHESION` (current `0.3`). Watch `faction_count` and
   the events log for "splits from" lines. Pinned by `test_kingdoms` and
