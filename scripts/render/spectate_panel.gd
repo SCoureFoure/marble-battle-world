@@ -12,6 +12,7 @@ const MAX_WINDOWS := 6
 const REFRESH := 0.5
 const SPAWN_OFFSET := Vector2(16, 16)
 const PORTRAIT_CACHE_MAX := 128
+const MAX_HERO_LINES := 6
 
 var world: World
 var shown_stack: int = -1
@@ -176,20 +177,26 @@ func _fill_stack(win: InfoWindow, stack_id: int) -> void:
 	if captain_alive:
 		captain_line = "Captain: %s (%s)" % [_unit_name(captain_u), _trait_name(world.units.ctrait[captain_u])]
 
-	var members: Array = []
-	var hero_count := 0
+	var heroes: Array = []
+	var weapon_counts: Array = []
+	weapon_counts.resize(Tuning.WEAPON_NAMES.size())
+	weapon_counts.fill(0)
+	var troop_count := 0
 	for u in range(world.units.n):
 		if world.units.alive[u] == 1 and world.units.stack[u] == stack_id:
-			members.append(u)
 			if world.units.hero[u] == 1:
-				hero_count += 1
-	members.sort_custom(func(a, b): return world.units.kills[a] > world.units.kills[b])
+				heroes.append(u)
+			else:
+				troop_count += 1
+				var wid: int = world.units.weapon[u]
+				if wid >= 0 and wid < weapon_counts.size():
+					weapon_counts[wid] += 1
+	heroes.sort_custom(func(a, b): return world.units.kills[a] > world.units.kills[b])
 
 	var lines: Array = [faction_label, captain_line]
 	lines.append("Gold: %d" % int(stacks.gold[stack_id]))
 	if captain_alive:
 		lines.append("Age: %ds / %ds" % [int(world.time - world.units.career_start[captain_u]), int(Tuning.HERO_LIFESPAN)])
-	lines.append("Heroes: %d" % hero_count)
 	var has_town := false
 	for i in range(world.towns.size()):
 		if world.town_owner[i] == f:
@@ -197,9 +204,17 @@ func _fill_stack(win: InfoWindow, stack_id: int) -> void:
 			break
 	if not has_town:
 		lines.append("Free company")
-	for k in range(mini(5, members.size())):
-		var u: int = members[k]
-		lines.append("%s — %d kills" % [_unit_name(u), world.units.kills[u]])
+	lines.append("Heroes: %d" % heroes.size())
+	for k in range(mini(MAX_HERO_LINES, heroes.size())):
+		var u: int = heroes[k]
+		lines.append("  %s — %d kills" % [_unit_name(u), world.units.kills[u]])
+	if heroes.size() > MAX_HERO_LINES:
+		lines.append("  +%d more" % (heroes.size() - MAX_HERO_LINES))
+	lines.append("Troops: %d" % troop_count)
+	for wid in range(weapon_counts.size()):
+		if weapon_counts[wid] > 0:
+			var weapon_name: String = Tuning.WEAPON_NAMES[wid]
+			lines.append("  %ss — %d" % [weapon_name.capitalize(), weapon_counts[wid]])
 	# UNDECIDED: "goal name" has no fiat wording; using the Stacks.Goal enum's
 	# own key (e.g. "HUNT_WEAK") rather than inventing display prose.
 	lines.append("Goal: %s" % Stacks.Goal.keys()[stacks.goal[stack_id]])
